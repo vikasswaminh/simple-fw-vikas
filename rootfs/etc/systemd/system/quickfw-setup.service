@@ -1,0 +1,14 @@
+[Unit]
+Description=QuickFW First Boot Setup
+After=multi-user.target
+ConditionPathExists=!/etc/quickfw/appliance.yaml
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/quickfw-setup
+StandardInput=tty
+TTYPath=/dev/tty1
+RemainAfterExit=no
+
+[Install]
+WantedBy=multi-user.target

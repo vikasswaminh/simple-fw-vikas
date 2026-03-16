@@ -1,0 +1,8 @@
+/target/
+*.iso
+output/
+*.vmdk
+*.vmem
+*.lck
+*.dmp
+Cargo.lock

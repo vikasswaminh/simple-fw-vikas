@@ -1,0 +1,13 @@
+[package]
+name = "quickfw-setup"
+version = "1.0.0"
+edition = "2021"
+
+[[bin]]
+name = "quickfw-setup"
+path = "src/main.rs"
+
+[dependencies]
+gfw-ifmgr = { package = "ifmgr", path = "../ifmgr" }
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"

@@ -1,0 +1,17 @@
+[Unit]
+Description=QuickFW Emergency Recovery Console
+After=multi-user.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/quickfw-console
+Restart=always
+RestartSec=2
+StandardInput=tty
+StandardOutput=tty
+TTYPath=/dev/tty2
+TTYReset=yes
+TTYVHangup=yes
+
+[Install]
+WantedBy=multi-user.target

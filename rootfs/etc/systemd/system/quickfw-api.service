@@ -1,0 +1,22 @@
+[Unit]
+Description=QuickFW API Server & Web Dashboard
+After=network-online.target nftables.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+Environment=STATIC_FILES_PATH=/opt/quickfw/front
+ExecStart=/usr/local/bin/quickfw-api --log-level info
+LimitNOFILE=65536
+Restart=on-failure
+RestartSec=3s
+StartLimitIntervalSec=300
+StartLimitBurst=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=quickfw-api
+
+[Install]
+WantedBy=multi-user.target

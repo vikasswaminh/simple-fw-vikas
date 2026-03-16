@@ -1,0 +1,249 @@
+#!/bin/bash
+# ═══════════════════════════════════════════════════════════════════
+# QuickFW Emergency Recovery Console
+# Runs on tty2 as fallback if CLI binary fails
+# ═══════════════════════════════════════════════════════════════════
+
+set -e
+
+# Recreate MGMT_SAFETY chain to ensure SSH/HTTPS/ICMP always work
+recreate_mgmt_safety() {
+    nft add table inet quickfw 2>/dev/null || true
+    nft add chain inet quickfw MGMT_SAFETY '{ type filter hook input priority -200; policy accept; }' 2>/dev/null || true
+    nft flush chain inet quickfw MGMT_SAFETY 2>/dev/null || true
+    nft add rule inet quickfw MGMT_SAFETY tcp dport '{ 22, 443, 3000 }' counter accept 2>/dev/null || true
+    nft add rule inet quickfw MGMT_SAFETY meta l4proto icmp counter accept 2>/dev/null || true
+    nft add rule inet quickfw MGMT_SAFETY meta l4proto icmpv6 counter accept 2>/dev/null || true
+}
+
+pause_prompt() {
+    echo ""
+    read -p "Press Enter to continue..." _
+}
+
+while true; do
+    clear
+    HOSTNAME=$(cat /etc/hostname 2>/dev/null || echo "quickfw")
+    UPTIME=$(uptime -p 2>/dev/null || echo "unknown")
+    echo "╔══════════════════════════════════════════╗"
+    echo "║   QuickFW — Emergency Recovery Console   ║"
+    printf "║   Host: %-14s %-18s ║\n" "$HOSTNAME" "$UPTIME"
+    echo "╠══════════════════════════════════════════╣"
+    echo "║  1. Show IP Addresses                    ║"
+    echo "║  2. Show System Status                   ║"
+    echo "║  3. Reset Admin Password (web UI)        ║"
+    echo "║  4. Reset Root Password (Linux)          ║"
+    echo "║  5. Enable / Disable SSH                 ║"
+    echo "║  6. Flush Firewall (Emergency)           ║"
+    echo "║  7. Re-run Setup Wizard                  ║"
+    echo "║  8. Factory Reset                        ║"
+    echo "║  9. Reboot / Shutdown                    ║"
+    echo "║  0. Drop to Root Shell                   ║"
+    echo "╚══════════════════════════════════════════╝"
+    echo ""
+    read -p "Select [0-9]: " choice
+
+    case "$choice" in
+        1)
+            echo ""
+            echo "=== IP Addresses ==="
+            ip -4 addr show | grep -E "inet |^[0-9]" || echo "(no addresses found)"
+            echo ""
+            echo "=== IPv6 Addresses ==="
+            ip -6 addr show scope global 2>/dev/null | grep -E "inet6 |^[0-9]" || echo "(none)"
+            echo ""
+            echo "=== Default Route ==="
+            ip route show default 2>/dev/null || echo "(no default route)"
+            pause_prompt
+            ;;
+        2)
+            echo ""
+            echo "=== QuickFW API Service ==="
+            systemctl status quickfw-api --no-pager 2>/dev/null || echo "(service not found)"
+            echo ""
+            echo "=== Firewall Rules ==="
+            RULE_COUNT=$(nft list ruleset 2>/dev/null | wc -l)
+            echo "nftables ruleset: ${RULE_COUNT} lines"
+            echo ""
+            echo "=== Conntrack ==="
+            conntrack -C 2>/dev/null || echo "(conntrack not available)"
+            echo ""
+            echo "=== Memory ==="
+            free -h 2>/dev/null || echo "(free not available)"
+            echo ""
+            echo "=== Uptime / Load ==="
+            uptime 2>/dev/null || echo "(unknown)"
+            echo ""
+            echo "=== Disk ==="
+            df -h / 2>/dev/null || echo "(unknown)"
+            pause_prompt
+            ;;
+        3)
+            echo ""
+            echo "=== Reset Web UI Admin Password ==="
+            read -s -p "Enter new admin password: " NEW_PASS
+            echo ""
+            if [ -z "$NEW_PASS" ]; then
+                echo "ERROR: Password cannot be empty."
+            else
+                read -s -p "Confirm new password: " CONFIRM_PASS
+                echo ""
+                if [ "$NEW_PASS" != "$CONFIRM_PASS" ]; then
+                    echo "ERROR: Passwords do not match."
+                else
+                    mkdir -p /etc/quickfw
+                    echo "$NEW_PASS" > /etc/quickfw/admin.password
+                    chmod 600 /etc/quickfw/admin.password
+                    echo "Admin password has been reset."
+                    echo "Restart the API service for changes to take effect:"
+                    echo "  systemctl restart quickfw-api"
+                fi
+            fi
+            pause_prompt
+            ;;
+        4)
+            echo ""
+            echo "=== Reset Root (Linux) Password ==="
+            read -s -p "Enter new root password: " ROOT_PASS1
+            echo ""
+            read -s -p "Confirm new root password: " ROOT_PASS2
+            echo ""
+            if [ -z "$ROOT_PASS1" ]; then
+                echo "ERROR: Password cannot be empty."
+            elif [ "$ROOT_PASS1" != "$ROOT_PASS2" ]; then
+                echo "ERROR: Passwords do not match."
+            else
+                echo "root:${ROOT_PASS1}" | chpasswd
+                if [ $? -eq 0 ]; then
+                    echo "Root password changed successfully."
+                else
+                    echo "ERROR: Failed to change root password."
+                fi
+            fi
+            pause_prompt
+            ;;
+        5)
+            echo ""
+            echo "=== SSH Service ==="
+            if systemctl is-active --quiet sshd 2>/dev/null || systemctl is-active --quiet ssh 2>/dev/null; then
+                echo "SSH is currently ACTIVE."
+                read -p "Disable SSH? (y/N): " DISABLE_SSH
+                if [ "$DISABLE_SSH" = "y" ] || [ "$DISABLE_SSH" = "Y" ]; then
+                    systemctl stop sshd 2>/dev/null || systemctl stop ssh 2>/dev/null
+                    systemctl disable sshd 2>/dev/null || systemctl disable ssh 2>/dev/null
+                    echo "SSH has been stopped and disabled."
+                else
+                    echo "No changes made."
+                fi
+            else
+                echo "SSH is currently INACTIVE."
+                read -p "Enable SSH? (y/N): " ENABLE_SSH
+                if [ "$ENABLE_SSH" = "y" ] || [ "$ENABLE_SSH" = "Y" ]; then
+                    systemctl enable sshd 2>/dev/null || systemctl enable ssh 2>/dev/null
+                    systemctl start sshd 2>/dev/null || systemctl start ssh 2>/dev/null
+                    echo "SSH has been enabled and started."
+                else
+                    echo "No changes made."
+                fi
+            fi
+            pause_prompt
+            ;;
+        6)
+            echo ""
+            echo "=== Emergency Firewall Flush ==="
+            echo "WARNING: This will remove ALL firewall rules!"
+            echo "A management safety chain will be recreated to keep SSH/HTTPS access."
+            echo ""
+            read -p "Are you sure? (y/N): " FLUSH_CONFIRM
+            if [ "$FLUSH_CONFIRM" = "y" ] || [ "$FLUSH_CONFIRM" = "Y" ]; then
+                echo "Flushing all nftables rules..."
+                nft flush ruleset
+                echo "Recreating MGMT_SAFETY chain..."
+                recreate_mgmt_safety
+                echo ""
+                echo "Firewall flushed. Management access preserved (SSH:22, HTTPS:443, HTTP:3000, ICMP)."
+            else
+                echo "Cancelled."
+            fi
+            pause_prompt
+            ;;
+        7)
+            echo ""
+            echo "=== Re-run First Boot Setup ==="
+            echo "This will delete the appliance config and start the setup wizard."
+            read -p "Continue? (y/N): " SETUP_CONFIRM
+            if [ "$SETUP_CONFIRM" = "y" ] || [ "$SETUP_CONFIRM" = "Y" ]; then
+                rm -f /etc/quickfw/appliance.yaml
+                echo "Launching setup wizard..."
+                exec /usr/local/bin/quickfw-setup
+            else
+                echo "Cancelled."
+            fi
+            pause_prompt
+            ;;
+        8)
+            echo ""
+            echo "=== FACTORY RESET ==="
+            echo "WARNING: This will:"
+            echo "  - Stop all QuickFW services"
+            echo "  - Delete ALL configuration files"
+            echo "  - Delete the admin password"
+            echo "  - Flush all firewall rules"
+            echo "  - Reboot the appliance"
+            echo ""
+            read -p "TYPE YES to confirm factory reset: " FACTORY_CONFIRM
+            if [ "$FACTORY_CONFIRM" = "YES" ]; then
+                echo ""
+                echo "Stopping services..."
+                systemctl stop quickfw-api 2>/dev/null || true
+                systemctl stop quickfw-cli 2>/dev/null || true
+                echo "Removing configuration..."
+                rm -f /etc/quickfw/*.yaml 2>/dev/null || true
+                rm -f /etc/quickfw/admin.password 2>/dev/null || true
+                rm -f /etc/quickfw/*.json 2>/dev/null || true
+                echo "Flushing firewall..."
+                nft flush ruleset 2>/dev/null || true
+                echo ""
+                echo "Factory reset complete. Rebooting in 3 seconds..."
+                sleep 3
+                reboot
+            else
+                echo "Factory reset cancelled."
+            fi
+            pause_prompt
+            ;;
+        9)
+            echo ""
+            echo "=== Reboot / Shutdown ==="
+            echo "  1. Reboot now"
+            echo "  2. Shutdown now"
+            echo "  3. Cancel"
+            echo ""
+            read -p "Select [1-3]: " POWER_CHOICE
+            case "$POWER_CHOICE" in
+                1)
+                    echo "Rebooting..."
+                    reboot
+                    ;;
+                2)
+                    echo "Shutting down..."
+                    poweroff
+                    ;;
+                *)
+                    echo "Cancelled."
+                    ;;
+            esac
+            pause_prompt
+            ;;
+        0)
+            echo ""
+            echo "Dropping to root shell. Type 'exit' to return to this console."
+            exec /bin/bash --login
+            ;;
+        *)
+            echo ""
+            echo "Invalid option: $choice"
+            sleep 1
+            ;;
+    esac
+done

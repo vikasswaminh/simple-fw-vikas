@@ -1,0 +1,36 @@
+#!/bin/bash
+# ═══════════════════════════════════════════════════════════════════
+# QuickFW — NIC offload + IRQ affinity tuner
+# Run at boot via systemd or manually
+# ═══════════════════════════════════════════════════════════════════
+
+set -e
+
+echo "[quickfw] Starting NIC offload and IRQ affinity tuning..."
+
+# Enable hardware offloads
+for iface in $(ls /sys/class/net/ | grep -v lo); do
+    echo "[quickfw] Configuring offloads for $iface"
+    ethtool -K "$iface" gro on gso on tso on rx-checksumming on tx-checksumming on 2>/dev/null || true
+    ethtool -G "$iface" rx 4096 tx 4096 2>/dev/null || true
+    ethtool -C "$iface" adaptive-rx on adaptive-tx on 2>/dev/null || true
+done
+
+# Spread NIC IRQs across CPUs
+NCPU=$(nproc)
+echo "[quickfw] Distributing IRQs across $NCPU CPUs"
+for iface in $(ls /sys/class/net/ | grep -v lo); do
+    IRQS=$(grep "$iface" /proc/interrupts 2>/dev/null | awk '{print $1}' | tr -d ':')
+    CPU=0
+    for IRQ in $IRQS; do
+        echo $CPU > /proc/irq/$IRQ/smp_affinity_list 2>/dev/null || true
+        CPU=$(( (CPU + 1) % NCPU ))
+    done
+done
+
+# CPU performance governor
+for g in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
+    echo performance > "$g" 2>/dev/null || true
+done
+
+echo "[quickfw] NIC offloads, IRQ affinity, and CPU governor configured"

@@ -1,0 +1,5 @@
+export PS1='\[\e[1;34m\]quickfw\[\e[0m\]:\w# '
+alias ll='ls -la'
+alias fw='nft list ruleset'
+alias conns='conntrack -C'
+alias ifs='ip -br addr'

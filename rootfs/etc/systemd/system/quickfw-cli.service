@@ -1,0 +1,17 @@
+[Unit]
+Description=QuickFW CLI Console
+After=multi-user.target quickfw-api.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/quickfw
+Restart=always
+RestartSec=1
+StandardInput=tty
+StandardOutput=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+
+[Install]
+WantedBy=multi-user.target
