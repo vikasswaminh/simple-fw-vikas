@@ -188,6 +188,9 @@ pub async fn create_router() -> Router {
 // ===================================================================
 
 async fn get_system_info() -> Json<SystemInfo> {
+    // TODO: wrap blocking fs::read_to_string / /proc reads with spawn_blocking
+    // for high-concurrency deployments. For a firewall appliance with <10 users
+    // this is acceptable.
     let hostname = fs::read_to_string("/etc/hostname")
         .unwrap_or_else(|_| "quickfw".to_string())
         .trim()
@@ -418,8 +421,12 @@ async fn set_interface_config(
         }
     }
 
-    // Description (stored in config file)
+    // Description (stored in config file, max 128 chars)
     if let Some(ref desc) = req.description {
+        if desc.len() > 128 {
+            error!("Interface description too long (max 128 chars)");
+            return Err(StatusCode::BAD_REQUEST);
+        }
         let mut descriptions = load_descriptions();
         if desc.is_empty() {
             descriptions.descriptions.remove(iface);
@@ -491,8 +498,16 @@ async fn set_interface_config(
             }
         }
         if !req.dns.is_empty() {
+            if req.dns.len() > 10 {
+                error!("Too many DNS servers (max 10)");
+                return Err(StatusCode::BAD_REQUEST);
+            }
             // Validate each DNS server is a valid IP
             for d in &req.dns {
+                if d.len() > 45 {
+                    error!("DNS server address too long (max 45 chars)");
+                    return Err(StatusCode::BAD_REQUEST);
+                }
                 if !is_valid_ip(d) {
                     error!("Invalid DNS server IP: {}", d);
                     return Err(StatusCode::BAD_REQUEST);
@@ -631,9 +646,28 @@ async fn save_settings(
             .args(["set-timezone", &config.timezone])
             .output();
     }
+    // Validate NTP servers
+    if config.ntp_servers.len() > 5 {
+        error!("Too many NTP servers (max 5)");
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    for ntp in &config.ntp_servers {
+        if ntp.len() > 64 {
+            error!("NTP server name too long (max 64 chars)");
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    }
     // Validate DNS servers
+    if config.dns_servers.len() > 10 {
+        error!("Too many DNS servers (max 10)");
+        return Err(StatusCode::BAD_REQUEST);
+    }
     if !config.dns_servers.is_empty() {
         for d in &config.dns_servers {
+            if d.len() > 45 {
+                error!("DNS server address too long (max 45 chars)");
+                return Err(StatusCode::BAD_REQUEST);
+            }
             if !is_valid_ip(d) {
                 error!("Invalid DNS server IP in settings: {}", d);
                 return Err(StatusCode::BAD_REQUEST);
@@ -801,6 +835,18 @@ async fn restore_config_backup(
     }
 
     let backup_path = format!("/etc/quickfw/backups/{}", req.name);
+
+    // Prevent symlink-based path traversal
+    if std::fs::symlink_metadata(&backup_path)
+        .map(|m| m.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Invalid backup (symlink)"})),
+        ));
+    }
+
     if !std::path::Path::new(&backup_path).exists() {
         return Err((
             StatusCode::NOT_FOUND,
@@ -1184,6 +1230,12 @@ async fn save_syslog_config(
         ));
     }
     if !config.server.is_empty() {
+        if config.server.len() > 128 {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "Syslog server address too long (max 128 chars)"})),
+            ));
+        }
         // Validate as IP or hostname (simple check)
         if !config
             .server

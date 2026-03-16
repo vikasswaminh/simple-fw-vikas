@@ -8,12 +8,12 @@ set -e
 
 # Recreate MGMT_SAFETY chain to ensure SSH/HTTPS/ICMP always work
 recreate_mgmt_safety() {
-    nft add table inet quickfw 2>/dev/null || true
-    nft add chain inet quickfw MGMT_SAFETY '{ type filter hook input priority -200; policy accept; }' 2>/dev/null || true
-    nft flush chain inet quickfw MGMT_SAFETY 2>/dev/null || true
-    nft add rule inet quickfw MGMT_SAFETY tcp dport '{ 22, 443, 3000 }' counter accept 2>/dev/null || true
-    nft add rule inet quickfw MGMT_SAFETY meta l4proto icmp counter accept 2>/dev/null || true
-    nft add rule inet quickfw MGMT_SAFETY meta l4proto icmpv6 counter accept 2>/dev/null || true
+    nft add table inet gfw_rs 2>/dev/null || true
+    nft add chain inet gfw_rs MGMT_SAFETY '{ type filter hook input priority -200; policy accept; }' 2>/dev/null || true
+    nft flush chain inet gfw_rs MGMT_SAFETY 2>/dev/null || true
+    nft add rule inet gfw_rs MGMT_SAFETY tcp dport '{ 22, 443, 3000 }' counter accept 2>/dev/null || true
+    nft add rule inet gfw_rs MGMT_SAFETY meta l4proto icmp counter accept 2>/dev/null || true
+    nft add rule inet gfw_rs MGMT_SAFETY meta l4proto icmpv6 counter accept 2>/dev/null || true
 }
 
 pause_prompt() {
@@ -92,6 +92,8 @@ while true; do
                     echo "ERROR: Passwords do not match."
                 else
                     mkdir -p /etc/quickfw
+                    # Writes plaintext intentionally — auth.rs auto-migrates to
+                    # Argon2 hash on the next successful login attempt.
                     echo "$NEW_PASS" > /etc/quickfw/admin.password
                     chmod 600 /etc/quickfw/admin.password
                     echo "Admin password has been reset."

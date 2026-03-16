@@ -5,11 +5,10 @@ use axum::Router;
 use clap::Parser;
 use std::net::SocketAddr;
 use std::time::Duration;
-use tower_http::cors::{AllowOrigin, CorsLayer};
 
 use std::path::Path;
 
-use axum::http::{header, HeaderValue, Method};
+use axum::http::{header, HeaderValue};
 use tracing::{error, info};
 
 /// Security headers middleware — sets CSP, X-Frame-Options, etc. on every response.
@@ -56,12 +55,8 @@ async fn security_headers_middleware(
 }
 
 async fn create_router() -> Router {
-    // CORS layer: restrict to same-origin only
-    let cors = CorsLayer::new()
-        .allow_origin(AllowOrigin::any()) // Will be tightened per-deployment; safe because we require auth headers
-        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE, Method::OPTIONS])
-        .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE])
-        .max_age(Duration::from_secs(3600));
+    // No CORS layer — the web UI is served from the same origin,
+    // so cross-origin requests are not needed and should be blocked.
 
     quickfw_api::file::create_router()
         .await
@@ -75,7 +70,6 @@ async fn create_router() -> Router {
         .layer(middleware::from_fn(quickfw_api::audit::audit_middleware)) // inside auth (sees AuthUser)
         .layer(middleware::from_fn(quickfw_api::auth::basic_auth_middleware))
         .layer(middleware::from_fn(security_headers_middleware)) // outside auth so headers appear on 401/403 too
-        .layer(cors)
 }
 
 #[derive(Parser, Debug)]

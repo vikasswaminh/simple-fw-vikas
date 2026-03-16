@@ -94,9 +94,31 @@ fn unix_now() -> u64 {
         .as_secs()
 }
 
+const AUDIT_MAX_BYTES: u64 = 10 * 1024 * 1024; // 10 MB
+const AUDIT_KEEP_BYTES: usize = 5 * 1024 * 1024; // 5 MB
+
 fn append_audit_line(content: &str) -> std::io::Result<()> {
-    use std::io::Write;
+    use std::io::{Read, Write};
     let _ = std::fs::create_dir_all("/var/log/quickfw");
+
+    // Rotate if file exceeds 10 MB: keep the last 5 MB
+    if let Ok(meta) = std::fs::metadata(AUDIT_LOG_PATH) {
+        if meta.len() > AUDIT_MAX_BYTES {
+            if let Ok(mut f) = std::fs::File::open(AUDIT_LOG_PATH) {
+                let skip = meta.len() as usize - AUDIT_KEEP_BYTES;
+                let mut buf = Vec::with_capacity(AUDIT_KEEP_BYTES);
+                let _ = std::io::Seek::seek(&mut f, std::io::SeekFrom::Start(skip as u64));
+                let _ = f.read_to_end(&mut buf);
+                drop(f);
+                // Trim to the next newline boundary so we don't leave a partial line
+                if let Some(pos) = buf.iter().position(|&b| b == b'\n') {
+                    buf = buf[pos + 1..].to_vec();
+                }
+                let _ = std::fs::write(AUDIT_LOG_PATH, &buf);
+            }
+        }
+    }
+
     let mut file = std::fs::OpenOptions::new()
         .create(true)
         .append(true)

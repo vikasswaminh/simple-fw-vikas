@@ -11,6 +11,30 @@ use tracing::{error, info};
 
 use crate::nfqueue::{NFT_FAMILY, NFT_TABLE};
 
+/// Sanitize a string for safe interpolation into nftables scripts.
+/// Removes characters that could break nft syntax or inject commands,
+/// and truncates to `max_len` characters.
+fn sanitize_nft_string(s: &str, max_len: usize) -> String {
+    s.chars()
+        .filter(|c| *c != '"' && *c != '\n' && *c != '\r' && *c != '\\' && *c != ';' && *c != '{' && *c != '}')
+        .filter(|c| !c.is_control())
+        .take(max_len)
+        .collect()
+}
+
+/// Validate that a time string is strictly HH:MM format.
+fn is_valid_time(s: &str) -> bool {
+    if s.len() != 5 {
+        return false;
+    }
+    let bytes = s.as_bytes();
+    bytes[0].is_ascii_digit()
+        && bytes[1].is_ascii_digit()
+        && bytes[2] == b':'
+        && bytes[3].is_ascii_digit()
+        && bytes[4].is_ascii_digit()
+}
+
 /// Complete firewall policy configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct FirewallConfig {
@@ -100,7 +124,7 @@ const FW_INPUT_CHAIN: &str = "gfw_fw_input";
 const FW_FORWARD_CHAIN: &str = "gfw_fw_forward";
 const FW_OUTPUT_CHAIN: &str = "gfw_fw_output";
 
-const FW_CONFIG_PATH: &str = "/etc/gfw-rs/firewall.yaml";
+const FW_CONFIG_PATH: &str = "/etc/quickfw/firewall.yaml";
 
 /// Load firewall config from disk.
 ///
@@ -178,7 +202,7 @@ fn generate_rule_nft(rule: &FirewallRule, zones: &[ZoneMapping]) -> Vec<String> 
     let log_prefix = if rule.log {
         format!(
             "log prefix \"gfw:{}\" ",
-            rule.name.replace('"', "").chars().take(16).collect::<String>()
+            sanitize_nft_string(&rule.name, 16)
         )
     } else {
         String::new()
@@ -187,7 +211,7 @@ fn generate_rule_nft(rule: &FirewallRule, zones: &[ZoneMapping]) -> Vec<String> 
     let comment_str = if !rule.name.is_empty() {
         format!(
             " comment \"{}\"",
-            rule.name.replace('"', "").chars().take(32).collect::<String>()
+            sanitize_nft_string(&rule.name, 32)
         )
     } else {
         String::new()
@@ -261,7 +285,9 @@ fn generate_rule_nft(rule: &FirewallRule, zones: &[ZoneMapping]) -> Vec<String> 
                             ));
                         }
                     }
-                    if !sched.start.is_empty() && !sched.end.is_empty() {
+                    if !sched.start.is_empty() && !sched.end.is_empty()
+                        && is_valid_time(&sched.start) && is_valid_time(&sched.end)
+                    {
                         parts.push(format!(
                             "meta hour \"{}\"-\"{}\"",
                             sched.start, sched.end

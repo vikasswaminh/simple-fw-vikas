@@ -2,7 +2,7 @@
 //! WebSocket token auth, and per-IP rate limiting.
 
 use argon2::{
-    password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
+    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
     Argon2,
 };
 use axum::{
@@ -14,6 +14,7 @@ use axum::{
     Json, Router,
 };
 use rand::Rng;
+use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -323,7 +324,7 @@ fn check_session_cookie(request: &Request) -> Option<String> {
 }
 
 fn create_session(user: &str) -> String {
-    let token: String = rand::thread_rng()
+    let token: String = OsRng
         .sample_iter(&rand::distributions::Alphanumeric)
         .take(64)
         .map(char::from)
@@ -364,6 +365,7 @@ fn destroy_session(token: &str) {
 // --- Password helpers ---
 
 fn is_default_password() -> bool {
+    // TODO: wrap with tokio::task::spawn_blocking for high-concurrency deployments
     match std::fs::read_to_string(ADMIN_PASSWORD_PATH) {
         Ok(stored) => {
             let stored = stored.trim();
@@ -388,6 +390,7 @@ fn verify_credentials(user: &str, pass: &str) -> bool {
         return false;
     }
 
+    // TODO: wrap with tokio::task::spawn_blocking for high-concurrency deployments
     let stored = std::fs::read_to_string(ADMIN_PASSWORD_PATH)
         .map(|s| s.trim().to_string())
         .unwrap_or_default();
@@ -459,7 +462,7 @@ pub fn list_active_sessions() -> Vec<serde_json::Value> {
 // --- WS token helpers ---
 
 fn generate_ws_token() -> String {
-    let token: String = rand::thread_rng()
+    let token: String = OsRng
         .sample_iter(&rand::distributions::Alphanumeric)
         .take(64)
         .map(char::from)
@@ -607,6 +610,8 @@ async fn get_ws_token() -> Json<WsTokenResponse> {
 }
 
 // --- Base64 decode ---
+// Minimal self-contained base64 implementation — avoids adding an external crate
+// dependency for a single decode call (Basic auth header). Sufficient for this use case.
 
 fn base64_decode(input: &str) -> Result<String, ()> {
     let bytes = base64_decode_bytes(input)?;
