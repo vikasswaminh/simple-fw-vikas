@@ -1,9 +1,10 @@
 //! NAT rule management API endpoints.
 
 use axum::{
+    extract::Path,
     http::StatusCode,
     response::IntoResponse,
-    routing::{get, post},
+    routing::{delete, get, post},
     Json, Router,
 };
 use gfw_io::nat::NatConfig;
@@ -17,6 +18,8 @@ pub async fn create_router() -> Router {
     Router::new()
         .route("/api/nat", get(get_nat_config))
         .route("/api/nat", post(save_nat_config))
+        .route("/api/nat/masquerade/:idx", delete(delete_masquerade))
+        .route("/api/nat/port_forward/:idx", delete(delete_port_forward))
 }
 
 async fn get_nat_config() -> Json<NatConfig> {
@@ -73,4 +76,90 @@ fn load_nat_config() -> Result<NatConfig, Box<dyn std::error::Error>> {
     let contents = std::fs::read_to_string(NAT_CONFIG_PATH)?;
     let config: NatConfig = serde_yaml::from_str(&contents)?;
     Ok(config)
+}
+
+async fn delete_masquerade(
+    Path(idx): Path<usize>,
+) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+    let mut config = load_nat_config().unwrap_or_default();
+
+    if idx == 0 || idx > config.masquerade.len() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Invalid index"})),
+        ));
+    }
+
+    config.masquerade.remove(idx - 1);
+
+    // Save and apply
+    let yaml = serde_yaml::to_string(&config).map_err(|e| {
+        error!("Failed to serialize NAT config: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Serialize failed: {}", e)})),
+        )
+    })?;
+
+    std::fs::write(NAT_CONFIG_PATH, &yaml).map_err(|e| {
+        error!("Failed to write NAT config: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Write failed: {}", e)})),
+        )
+    })?;
+
+    gfw_io::nat::apply_nat(&config).map_err(|e| {
+        error!("Failed to apply NAT rules: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Apply failed: {}", e)})),
+        )
+    })?;
+
+    info!("Masquerade rule {} deleted", idx);
+    Ok(Json(serde_json::json!({"message": "Masquerade rule deleted"})))
+}
+
+async fn delete_port_forward(
+    Path(idx): Path<usize>,
+) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+    let mut config = load_nat_config().unwrap_or_default();
+
+    if idx == 0 || idx > config.port_forward.len() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Invalid index"})),
+        ));
+    }
+
+    config.port_forward.remove(idx - 1);
+
+    // Save and apply
+    let yaml = serde_yaml::to_string(&config).map_err(|e| {
+        error!("Failed to serialize NAT config: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Serialize failed: {}", e)})),
+        )
+    })?;
+
+    std::fs::write(NAT_CONFIG_PATH, &yaml).map_err(|e| {
+        error!("Failed to write NAT config: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Write failed: {}", e)})),
+        )
+    })?;
+
+    gfw_io::nat::apply_nat(&config).map_err(|e| {
+        error!("Failed to apply NAT rules: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Apply failed: {}", e)})),
+        )
+    })?;
+
+    info!("Port forward rule {} deleted", idx);
+    Ok(Json(serde_json::json!({"message": "Port forward rule deleted"})))
 }

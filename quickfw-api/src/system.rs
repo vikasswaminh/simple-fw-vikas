@@ -165,6 +165,7 @@ pub async fn create_router() -> Router {
         .route("/api/system/info", get(get_system_info))
         .route("/api/system/traffic", get(get_traffic_snapshot))
         .route("/api/system/reboot", post(reboot_system))
+        .route("/api/health", get(health_check)) // health endpoint
         .route("/api/interfaces", get(get_interfaces))
         .route("/api/interfaces/config", post(set_interface_config))
         .route("/api/interfaces/:name/config", post(set_interface_config_by_path))
@@ -181,6 +182,12 @@ pub async fn create_router() -> Router {
         .route("/api/conntrack", get(get_conntrack))
         .route("/api/syslog", get(get_syslog_config))
         .route("/api/syslog", post(save_syslog_config))
+}
+
+// Simple health check – returns 200 OK if the server is running.
+async fn health_check() -> impl axum::response::IntoResponse {
+    // Could add deeper checks (e.g., connectivity to nft, DB) later.
+    (axum::http::StatusCode::OK, "OK")
 }
 
 // ===================================================================

@@ -75,19 +75,20 @@ async fn save_firewall_config(
     // Backup before save
     let _ = crate::config_utils::backup_config("/etc/quickfw/firewall.yaml");
 
-    firewall::save_firewall_config(&config).map_err(|e| {
-        error!("Failed to save firewall config: {}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": format!("Failed to save: {}", e)})),
-        )
-    })?;
-
+    // Apply firewall first; only save config if apply succeeds (rollback on failure)
     firewall::apply_firewall(&config).map_err(|e| {
         error!("Failed to apply firewall rules: {}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({"error": format!("Failed to apply: {}", e)})),
+        )
+    })?;
+
+    firewall::save_firewall_config(&config).map_err(|e| {
+        error!("Failed to save firewall config: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Failed to save: {}", e)})),
         )
     })?;
 

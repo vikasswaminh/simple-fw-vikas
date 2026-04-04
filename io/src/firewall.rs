@@ -97,6 +97,9 @@ pub struct FirewallRule {
     pub comment: String,
     #[serde(default)]
     pub schedule: Option<RuleSchedule>,
+    /// Apply rule to IPv6 (default: IPv4 only)
+    #[serde(default)]
+    pub ipv6: bool,
 }
 
 /// Time-based schedule for a firewall rule.

@@ -5,6 +5,7 @@ pub mod file;
 pub mod firewall_api;
 pub mod logger;
 pub mod nat_api;
+pub mod routing_api;
 pub mod system;
 pub mod tools;
 pub mod validation;

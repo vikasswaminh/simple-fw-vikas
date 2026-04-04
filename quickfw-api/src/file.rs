@@ -15,6 +15,7 @@ pub async fn create_router() -> Router {
         .route("/login.html", get(serve_login))
         .route("/fonts/:filename", get(serve_font))
         .route("/:filename", get(serve_static_file))
+        .fallback(serve_index) // SPA fallback for deep links
 }
 
 async fn serve_index() -> axum::response::Html<String> {

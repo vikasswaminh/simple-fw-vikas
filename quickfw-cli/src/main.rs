@@ -39,6 +39,7 @@ enum Mode {
     Config,
     ConfigInterface(String),
     ConfigFirewallRule(String),
+    ConfigRouter(String), // "ospf" or "bgp"
 }
 
 // ---------------------------------------------------------------------------
@@ -143,6 +144,9 @@ impl CliState {
             }
             Mode::ConfigFirewallRule(name) => {
                 format!("{}(config-fw-{})# ", self.hostname, name)
+            }
+            Mode::ConfigRouter(proto) => {
+                format!("{}(config-router-{})# ", self.hostname, proto)
             }
         }
     }
@@ -281,6 +285,8 @@ impl CliHelper {
                     "show firewall summary",
                     "show nat",
                     "show routes",
+                    "show ospf",
+                    "show bgp",
                     "show connections",
                     "show connections count",
                     "show running-config",
@@ -322,6 +328,8 @@ impl CliHelper {
                     "no nat port-forward",
                     "route",
                     "no route",
+                    "router ospf",
+                    "router bgp",
                 ]);
             }
             Mode::ConfigInterface(_) => {
@@ -353,6 +361,21 @@ impl CliHelper {
                     "log",
                     "enable",
                     "disable",
+                    "show",
+                ]);
+            }
+            Mode::ConfigRouter(_) => {
+                cmds.extend_from_slice(&[
+                    "router-id",
+                    "network",
+                    "area",
+                    "neighbor",
+                    "remote-as",
+                    "redistribute",
+                    "timers",
+                    "distance",
+                    "passive-interface",
+                    "no passive-interface",
                     "show",
                 ]);
             }
@@ -674,8 +697,8 @@ fn cmd_show_firewall(state: &CliState) {
                 let name = val_str(rule, "name");
                 let dir = val_str(rule, "direction");
                 let proto = val_str(rule, "protocol");
-                let src = val_str(rule, "source");
-                let dst = val_str(rule, "destination");
+                let src = val_str(rule, "src_ip");
+                let dst = val_str(rule, "dst_ip");
                 let action = val_str(rule, "action");
                 let enabled = if val_bool(rule, "enabled") {
                     "enabled"
@@ -800,8 +823,8 @@ fn cmd_show_nat(state: &CliState) {
                 print_separator(&widths);
                 for (i, m) in masq.iter().enumerate() {
                     let idx = format!("{}", i + 1);
-                    let iface = val_str(m, "interface");
-                    let src = val_str(m, "source");
+                    let iface = val_str(m, "out_interface");
+                    let src = val_str(m, "source_cidr");
                     print_row(&[&idx, iface, src], &widths);
                 }
             }
@@ -824,10 +847,10 @@ fn cmd_show_nat(state: &CliState) {
                 for (i, f) in pf.iter().enumerate() {
                     let idx = format!("{}", i + 1);
                     let proto = val_str(f, "protocol");
-                    let port = val_str(f, "port");
-                    let dest = val_str(f, "destination");
-                    let iface = val_str(f, "interface");
-                    print_row(&[&idx, proto, port, dest, iface], &widths);
+                    let port = format!("{}", val_u64(f, "dest_port"));
+                    let dest = val_str(f, "forward_to");
+                    let iface = val_str(f, "in_interface");
+                    print_row(&[&idx, proto, &port, dest, iface], &widths);
                 }
             }
 
@@ -860,6 +883,78 @@ fn cmd_show_routes(state: &CliState) {
                     let metric = format!("{}", val_u64(r, "metric"));
                     let iface = val_str(r, "interface");
                     print_row(&[dst, gw, &metric, iface], &widths);
+                }
+            }
+            println!();
+        }
+        Err(e) => print_error(&e),
+    }
+}
+
+fn cmd_show_ospf(state: &CliState) {
+    match state.api_get("/api/routing/ospf") {
+        Ok(data) => {
+            println!();
+            if let Some(enabled) = data.get("enabled").and_then(|v| v.as_bool()) {
+                println!("  OSPF: {}", if enabled { "enabled".green() } else { "disabled".red() });
+            }
+            if let Some(router_id) = data.get("router_id").and_then(|v| v.as_str()) {
+                println!("  Router ID: {}", router_id.bold());
+            }
+            if let Some(area) = data.get("area").and_then(|v| v.as_str()) {
+                println!("  Area: {}", area);
+            }
+            if let Some(networks) = data.get("networks").and_then(|v| v.as_array()) {
+                println!("  Networks:");
+                for n in networks {
+                    let network = val_str(n, "network");
+                    println!("    - {}", network);
+                }
+            }
+            if let Some(neighbors) = data.get("neighbors").and_then(|v| v.as_array()) {
+                println!("  Neighbors:");
+                let widths = [16, 16, 8, 12];
+                print_row(&["Neighbor ID", "IP Address", "State", "Uptime"], &widths);
+                print_separator(&widths);
+                for n in neighbors {
+                    let nid = val_str(n, "neighbor_id");
+                    let ip = val_str(n, "ip_address");
+                    let state = val_str(n, "state");
+                    let uptime = val_str(n, "uptime");
+                    print_row(&[nid, ip, state, uptime], &widths);
+                }
+            }
+            println!();
+        }
+        Err(e) => print_error(&e),
+    }
+}
+
+fn cmd_show_bgp(state: &CliState) {
+    match state.api_get("/api/routing/bgp") {
+        Ok(data) => {
+            println!();
+            if let Some(enabled) = data.get("enabled").and_then(|v| v.as_bool()) {
+                println!("  BGP: {}", if enabled { "enabled".green() } else { "disabled".red() });
+            }
+            if let Some(local_as) = data.get("local_as").and_then(|v| v.as_u64()) {
+                println!("  Local AS: {}", local_as.to_string().bold());
+            }
+            if let Some(router_id) = data.get("router_id").and_then(|v| v.as_str()) {
+                println!("  Router ID: {}", router_id.bold());
+            }
+            if let Some(neighbors) = data.get("neighbors").and_then(|v| v.as_array()) {
+                println!("  Neighbors:");
+                let widths = [16, 10, 8, 10, 12];
+                print_row(&["Remote AS", "IP Address", "State", "Prefixes", "Uptime"], &widths);
+                print_separator(&widths);
+                for n in neighbors {
+                    let remote_as = format!("{}", val_u64(n, "remote_as"));
+                    let ip = val_str(n, "ip_address");
+                    let state = val_str(n, "state");
+                    let prefixes = format!("{}", val_u64(n, "prefixes"));
+                    let uptime = val_str(n, "uptime");
+                    print_row(&[&remote_as, ip, state, &prefixes, uptime], &widths);
                 }
             }
             println!();
@@ -1045,12 +1140,10 @@ fn cmd_show_log(state: &CliState, args: &[&str]) {
 // Privileged-mode commands
 // ---------------------------------------------------------------------------
 
-fn cmd_write_memory(state: &CliState) {
-    print_info("Saving configuration...");
-    match state.api_post("/save/config", &json!({})) {
-        Ok(_) => print_ok("Configuration saved."),
-        Err(e) => print_error(&e),
-    }
+fn cmd_write_memory(_state: &CliState) {
+    // All config changes are persisted immediately via the API,
+    // so "write memory" is a no-op that just confirms the config is saved.
+    print_ok("Configuration saved (all changes are persisted immediately).");
 }
 
 fn cmd_reload(state: &CliState) {
@@ -1381,19 +1474,26 @@ fn cmd_config_nat_masquerade(state: &CliState, args: &[&str]) {
     }
     let iface = args[0];
     let source = args.get(1).copied().unwrap_or("0.0.0.0/0");
-    match state.api_post(
-        "/api/nat",
-        &json!({
-            "type": "masquerade",
-            "interface": iface,
-            "source": source
-        }),
-    ) {
-        Ok(_) => print_ok(&format!(
-            "Masquerade added: interface={}, source={}",
-            iface, source
-        )),
-        Err(e) => print_error(&e),
+    
+    // Fetch current NAT config, add rule, send back
+    match state.api_get("/api/nat") {
+        Ok(mut config) => {
+            if config.get("masquerade").is_none() {
+                config["masquerade"] = json!([]);
+            }
+            config["masquerade"].as_array_mut().unwrap().push(json!({
+                "out_interface": iface,
+                "source_cidr": source
+            }));
+            match state.api_post("/api/nat", &config) {
+                Ok(_) => print_ok(&format!(
+                    "Masquerade added: interface={}, source={}",
+                    iface, source
+                )),
+                Err(e) => print_error(&e),
+            }
+        }
+        Err(e) => print_error(&format!("Failed to fetch NAT config: {}", e)),
     }
 }
 
@@ -1403,23 +1503,32 @@ fn cmd_config_nat_port_forward(state: &CliState, args: &[&str]) {
         return;
     }
     let proto = args[0];
-    let port = args[1];
+    let port: u16 = match args[1].parse() {
+        Ok(p) => p,
+        Err(_) => {
+            print_error("Invalid port number");
+            return;
+        }
+    };
     let dest = args[2];
     let iface = args.get(3).copied().unwrap_or("any");
 
-    match state.api_post(
-        "/api/nat",
-        &json!({
-            "type": "port_forward",
-            "protocol": proto,
-            "port": port,
-            "destination": dest,
-            "interface": iface
-        }),
-    ) {
-        Ok(_) => print_ok(&format!(
-            "Port forward added: {} {} -> {} (if={})",
-            proto, port, dest, iface
+    // Fetch current NAT config, add rule, send back
+    match state.api_get("/api/nat") {
+        Ok(mut config) => {
+            if config.get("port_forward").is_none() {
+                config["port_forward"] = json!([]);
+            }
+            config["port_forward"].as_array_mut().unwrap().push(json!({
+                "protocol": proto,
+                "dest_port": port,
+                "forward_to": dest,
+                "in_interface": iface
+            }));
+            match state.api_post("/api/nat", &config) {
+                Ok(_) => print_ok(&format!(
+                    "Port forward added: {} {} -> {} (if={})",
+                    proto, port, dest, iface
         )),
         Err(e) => print_error(&e),
     }
@@ -1486,6 +1595,106 @@ fn cmd_config_route(state: &CliState, args: &[&str]) {
 fn cmd_config_no_route(state: &CliState, cidr: &str) {
     match state.api_delete(&format!("/api/routes/{}", cidr.replace('/', "%2F"))) {
         Ok(_) => print_ok(&format!("Route to {} removed.", cidr)),
+        Err(e) => print_error(&e),
+    }
+}
+
+fn cmd_config_router_ospf(state: &CliState, args: &[&str]) {
+    let mut config = json!({"enabled": true});
+    
+    for arg in args.chunks(2) {
+        match arg[0] {
+            "router-id" if arg.len() > 1 => {
+                config["router_id"] = json!(arg[1]);
+            }
+            "area" if arg.len() > 1 => {
+                config["area"] = json!(arg[1]);
+            }
+            "network" if arg.len() > 1 => {
+                if config.get("networks").is_none() {
+                    config["networks"] = json!([]);
+                }
+                config["networks"].as_array_mut().unwrap().push(json!({"network": arg[1]}));
+            }
+            _ => {}
+        }
+    }
+    
+    match state.api_post("/api/routing/ospf", &config) {
+        Ok(_) => print_ok("OSPF configuration applied."),
+        Err(e) => print_error(&e),
+    }
+}
+
+fn cmd_config_router_bgp(state: &CliState, args: &[&str]) {
+    let local_as = args.iter()
+        .position(|a| *a == "local-as")
+        .and_then(|i| args.get(i + 1))
+        .and_then(|a| a.parse::<u64>().ok());
+    
+    let local_as = match local_as {
+        Some(asn) => asn,
+        None => {
+            print_error("Usage: router bgp <local-as> [neighbor <ip> remote-as <asn>]");
+            return;
+        }
+    };
+    
+    let mut config = json!({
+        "enabled": true,
+        "local_as": local_as
+    });
+    
+    // Parse neighbors
+    let mut i = 0;
+    while i < args.len() {
+        if args[i] == "neighbor" && i + 3 < args.len() {
+            let neighbor_ip = args[i + 1];
+            if args[i + 2] == "remote-as" {
+                let remote_as: u64 = match args[i + 3].parse() {
+                    Ok(asn) => asn,
+                    Err(_) => {
+                        print_error("Invalid remote AS number");
+                        return;
+                    }
+                };
+                if config.get("neighbors").is_none() {
+                    config["neighbors"] = json!([]);
+                }
+                config["neighbors"].as_array_mut().unwrap().push(json!({
+                    "ip_address": neighbor_ip,
+                    "remote_as": remote_as
+                }));
+                i += 4;
+            } else {
+                i += 2;
+            }
+        } else if args[i] == "router-id" && i + 1 < args.len() {
+            config["router_id"] = json!(args[i + 1]);
+            i += 2;
+        } else {
+            i += 1;
+        }
+    }
+    
+    match state.api_post("/api/routing/bgp", &config) {
+        Ok(_) => print_ok("BGP configuration applied."),
+        Err(e) => print_error(&e),
+    }
+}
+
+fn cmd_no_router(state: &CliState, proto: &str) {
+    let endpoint = match proto {
+        "ospf" => "/api/routing/ospf",
+        "bgp" => "/api/routing/bgp",
+        _ => {
+            print_error("Usage: no router <ospf|bgp>");
+            return;
+        }
+    };
+    
+    match state.api_delete(endpoint) {
+        Ok(_) => print_ok(&format!("{} configuration removed.", proto.to_uppercase())),
         Err(e) => print_error(&e),
     }
 }
@@ -1648,9 +1857,39 @@ fn cmd_if_show(state: &CliState, iface: &str) {
 // ---------------------------------------------------------------------------
 
 fn cmd_fw_rule_apply(state: &CliState, rule: &FirewallRuleBuilder) {
-    match state.api_post("/api/firewall", &json!({"rule": rule.to_json()})) {
-        Ok(_) => print_ok(&format!("Rule '{}' applied.", rule.name)),
-        Err(e) => print_error(&e),
+    // Fetch current firewall config
+    match state.api_get("/api/firewall") {
+        Ok(mut config) => {
+            // Ensure config has rules array
+            if config.get("rules").is_none() {
+                config["rules"] = json!([]);
+            }
+            
+            // Convert rule builder to rule object
+            let rule_json = rule.to_json();
+            let rules = config["rules"].as_array_mut().unwrap();
+            
+            // Check if rule exists (update) or is new (insert)
+            let mut found = false;
+            for r in rules.iter_mut() {
+                if r.get("name") == rule_json.get("name") {
+                    *r = rule_json.clone();
+                    found = true;
+                    break;
+                }
+            }
+            
+            if !found {
+                rules.push(rule_json);
+            }
+            
+            // Send full config back
+            match state.api_post("/api/firewall", &config) {
+                Ok(_) => print_ok(&format!("Rule '{}' applied.", rule.name)),
+                Err(e) => print_error(&e),
+            }
+        }
+        Err(e) => print_error(&format!("Failed to fetch firewall config: {}", e)),
     }
 }
 
@@ -1758,6 +1997,10 @@ fn print_help(mode: &Mode) {
             println!("    no nat port-forward <index>            Remove port forward rule");
             println!("    route <cidr> via <gw> [metric <n>]     Add static route");
             println!("    no route <cidr>                        Remove static route");
+            println!("    router ospf                        Configure OSPF");
+            println!("    router bgp <local-as>                 Configure BGP");
+            println!("    no router <ospf|bgp>               Remove routing protocol");
+            println!("    show [options]                 Show running config");
             println!("    exit                                   Return to privileged mode");
         }
         Mode::ConfigInterface(name) => {
@@ -1800,6 +2043,35 @@ fn print_help(mode: &Mode) {
             println!("    show                              Show rule config");
             println!("    exit                              Apply and return to config mode");
         }
+        Mode::ConfigRouter(proto) => {
+            println!(
+                "  {} ({})",
+                "Available commands:".bold().underline(),
+                proto
+            );
+            match proto {
+                "ospf" => {
+                    println!("    router-id <id>              Set OSPF router ID");
+                    println!("    area <area-id>               Set OSPF area");
+                    println!("    network <cidr>              Advertise network in OSPF");
+                    println!("    passive-interface <if>       Set passive interface");
+                    println!("    no passive-interface <if>    Remove passive interface");
+                    println!("    timers <hello> <dead>       Set hello/dead timers");
+                    println!("    show                         Show OSPF config");
+                    println!("    exit                         Apply and return to config mode");
+                }
+                "bgp" => {
+                    println!("    local-as <asn>              Set local AS number");
+                    println!("    router-id <id>              Set BGP router ID");
+                    println!("    neighbor <ip> remote-as <asn> Add BGP neighbor");
+                    println!("    no neighbor <ip>             Remove BGP neighbor");
+                    println!("    redistribute <source>        Redistribute routes");
+                    println!("    show                         Show BGP config");
+                    println!("    exit                         Apply and return to config mode");
+                }
+                _ => {}
+            }
+        }
     }
     println!();
 }
@@ -1828,6 +2100,10 @@ fn dispatch(state: &mut CliState, line: &str) -> bool {
         Mode::ConfigFirewallRule(name) => {
             let name = name.clone();
             dispatch_config_fw_rule(state, &name, cmd, &parts)
+        }
+        Mode::ConfigRouter(proto) => {
+            let proto = proto.clone();
+            dispatch_config_router(state, &proto, cmd, &parts)
         }
     }
 }
@@ -1950,6 +2226,20 @@ fn dispatch_show(state: &CliState, args: &[&str]) {
         }
         "nat" => cmd_show_nat(state),
         "routes" => cmd_show_routes(state),
+        "ospf" => {
+            if matches!(state.mode, Mode::Privileged | Mode::Config | Mode::ConfigRouter(_)) {
+                cmd_show_ospf(state);
+            } else {
+                print_error("'show ospf' requires privileged mode.");
+            }
+        }
+        "bgp" => {
+            if matches!(state.mode, Mode::Privileged | Mode::Config | Mode::ConfigRouter(_)) {
+                cmd_show_bgp(state);
+            } else {
+                print_error("'show bgp' requires privileged mode.");
+            }
+        }
         "connections" => {
             if args.len() >= 2 && args[1] == "count" {
                 cmd_show_connections_count(state);
@@ -2099,6 +2389,55 @@ fn dispatch_config(state: &mut CliState, cmd: &str, parts: &[&str]) -> bool {
         }
         "route" => {
             cmd_config_route(state, &parts[1..]);
+        }
+        "router" => {
+            if parts.len() < 2 {
+                print_error("Usage: router ospf | router bgp");
+                return true;
+            }
+            match parts[1] {
+                "ospf" => {
+                    state.mode = Mode::ConfigRouter("ospf".to_string());
+                }
+                "bgp" => {
+                    state.mode = Mode::ConfigRouter("bgp".to_string());
+                }
+                _ => print_error("Usage: router ospf | router bgp"),
+            }
+        }
+        "no" => {
+            if parts.len() < 2 {
+                print_error("Usage: no nat ... | no route ... | no router ...");
+                return true;
+            }
+            match parts[1] {
+                "nat" => {
+                    if parts.len() < 4 {
+                        print_error("Usage: no nat masquerade <index> | no nat port-forward <index>");
+                        return true;
+                    }
+                    match parts[2] {
+                        "masquerade" => cmd_config_no_nat_masquerade(state, parts[3]),
+                        "port-forward" => cmd_config_no_nat_port_forward(state, parts[3]),
+                        _ => print_error(&format!("Unknown: no nat {}", parts[2])),
+                    }
+                }
+                "route" => {
+                    if parts.len() < 3 {
+                        print_error("Usage: no route <cidr>");
+                        return true;
+                    }
+                    cmd_config_no_route(state, parts[2]);
+                }
+                "router" => {
+                    if parts.len() < 3 {
+                        print_error("Usage: no router <ospf|bgp>");
+                        return true;
+                    }
+                    cmd_no_router(state, parts[2]);
+                }
+                _ => print_error(&format!("Unknown: no {}", parts[1])),
+            }
         }
         "show" => {
             if parts.len() >= 2 {
@@ -2327,6 +2666,125 @@ fn dispatch_config_fw_rule(
                 cmd_fw_rule_apply(state, rule);
             }
             state.current_rule = None;
+            state.mode = Mode::Config;
+        }
+        _ => print_error(&format!(
+            "Unknown command: '{}'. Type '?' for help.",
+            cmd
+        )),
+    }
+    true
+}
+
+fn dispatch_config_router(
+    state: &mut CliState,
+    proto: &str,
+    cmd: &str,
+    parts: &[&str],
+) -> bool {
+    match cmd {
+        "router-id" => {
+            if parts.len() < 2 {
+                print_error("Usage: router-id <id>");
+                return true;
+            }
+            match proto {
+                "ospf" => cmd_config_router_ospf(state, &["router-id", parts[1]]),
+                "bgp" => cmd_config_router_bgp(state, &["router-id", parts[1]]),
+                _ => {}
+            }
+        }
+        "area" | "network" => {
+            if parts.len() < 2 {
+                print_error(&format!("Usage: {} <value>", cmd));
+                return true;
+            }
+            cmd_config_router_ospf(state, &[cmd, parts[1]]);
+        }
+        "local-as" => {
+            if parts.len() < 2 {
+                print_error("Usage: local-as <asn>");
+                return true;
+            }
+            cmd_config_router_bgp(state, &["local-as", parts[1]]);
+        }
+        "neighbor" => {
+            if parts.len() < 4 || parts[2] != "remote-as" {
+                print_error("Usage: neighbor <ip> remote-as <asn>");
+                return true;
+            }
+            cmd_config_router_bgp(state, &["neighbor", parts[1], "remote-as", parts[3]]);
+        }
+        "passive-interface" => {
+            if parts.len() < 2 {
+                print_error("Usage: passive-interface <interface>");
+                return true;
+            }
+            // Send to API
+            match state.api_post("/api/routing/ospf", &json!({
+                "passive_interface": parts[1]
+            })) {
+                Ok(_) => print_ok("Passive interface set."),
+                Err(e) => print_error(&e),
+            }
+        }
+        "no" => {
+            if parts.len() < 2 {
+                print_error("Usage: no passive-interface <interface>");
+                return true;
+            }
+            match parts[1] {
+                "passive-interface" => {
+                    if parts.len() < 3 {
+                        print_error("Usage: no passive-interface <interface>");
+                        return true;
+                    }
+                    match state.api_post("/api/routing/ospf", &json!({
+                        "no_passive_interface": parts[2]
+                    })) {
+                        Ok(_) => print_ok("Passive interface removed."),
+                        Err(e) => print_error(&e),
+                    }
+                }
+                "neighbor" => {
+                    if parts.len() < 3 {
+                        print_error("Usage: no neighbor <ip>");
+                        return true;
+                    }
+                    match state.api_delete(&format!("/api/routing/bgp/neighbor/{}", parts[2])) {
+                        Ok(_) => print_ok("Neighbor removed."),
+                        Err(e) => print_error(&e),
+                    }
+                }
+                _ => print_error(&format!("Unknown: no {}", parts[1])),
+            }
+        }
+        "timers" => {
+            if parts.len() < 3 {
+                print_error("Usage: timers <hello> <dead>");
+                return true;
+            }
+            cmd_config_router_ospf(state, &["timers", parts[1], parts[2]]);
+        }
+        "redistribute" => {
+            if parts.len() < 2 {
+                print_error("Usage: redistribute <connected|static|ospf|bgp>");
+                return true;
+            }
+            match proto {
+                "bgp" => cmd_config_router_bgp(state, &["redistribute", parts[1]]),
+                _ => print_error("Redistribute only available in BGP mode."),
+            }
+        }
+        "show" => {
+            match proto {
+                "ospf" => cmd_show_ospf(state),
+                "bgp" => cmd_show_bgp(state),
+                _ => {}
+            }
+        }
+        "?" | "help" => print_help(&state.mode),
+        "exit" | "end" => {
             state.mode = Mode::Config;
         }
         _ => print_error(&format!(

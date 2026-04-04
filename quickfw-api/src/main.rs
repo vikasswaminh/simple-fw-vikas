@@ -63,6 +63,7 @@ async fn create_router() -> Router {
         .merge(quickfw_api::system::create_router().await)
         .merge(quickfw_api::firewall_api::create_router().await)
         .merge(quickfw_api::nat_api::create_router().await)
+        .merge(quickfw_api::routing_api::create_router().await)
         .merge(quickfw_api::auth::create_auth_router())
         .merge(quickfw_api::audit::create_router())
         .merge(quickfw_api::tools::create_router())
@@ -80,17 +81,20 @@ struct Cli {
 }
 
 /// Generate a self-signed TLS certificate if none exists.
-fn ensure_tls_cert() -> (String, String) {
+fn ensure_tls_cert() -> Result<(String, String), String> {
     let cert_path = "/etc/quickfw/tls.crt";
     let key_path = "/etc/quickfw/tls.key";
 
     if Path::new(cert_path).exists() && Path::new(key_path).exists() {
         info!("TLS certificate found at {}", cert_path);
-        return (cert_path.to_string(), key_path.to_string());
+        return Ok((cert_path.to_string(), key_path.to_string()));
     }
 
     info!("Generating self-signed TLS certificate...");
-    let _ = std::fs::create_dir_all("/etc/quickfw");
+    if let Err(e) = std::fs::create_dir_all("/etc/quickfw") {
+        error!("Failed to create /etc/quickfw directory: {}", e);
+        return Err(format!("Failed to create /etc/quickfw: {}", e));
+    }
     let output = std::process::Command::new("openssl")
         .args([
             "req",
@@ -114,12 +118,14 @@ fn ensure_tls_cert() -> (String, String) {
     match output {
         Ok(o) if o.status.success() => {
             // Set restrictive permissions on key file
-            let _ = std::process::Command::new("chmod")
-                .args(["600", key_path])
-                .output();
-            let _ = std::process::Command::new("chmod")
-                .args(["644", cert_path])
-                .output();
+            if let Err(e) = std::process::Command::new("chmod").args(["600", key_path]).output() {
+                error!("Failed to chmod key file: {}", e);
+                return Err(format!("Failed to chmod key file: {}", e));
+            }
+            if let Err(e) = std::process::Command::new("chmod").args(["644", cert_path]).output() {
+                error!("Failed to chmod cert file: {}", e);
+                return Err(format!("Failed to chmod cert file: {}", e));
+            }
             info!("Self-signed TLS certificate generated successfully");
         }
         Ok(o) => {
@@ -127,13 +133,19 @@ fn ensure_tls_cert() -> (String, String) {
                 "Failed to generate TLS certificate: {}",
                 String::from_utf8_lossy(&o.stderr)
             );
+            return Err(format!("Failed to generate TLS certificate: {}", String::from_utf8_lossy(&o.stderr)));
         }
         Err(e) => {
             error!("Failed to run openssl: {}", e);
+            return Err(format!("Failed to run openssl: {}", e));
         }
     }
 
-    (cert_path.to_string(), key_path.to_string())
+    if Path::new(cert_path).exists() && Path::new(key_path).exists() {
+        Ok((cert_path.to_string(), key_path.to_string()))
+    } else {
+        Err("TLS certificate or key file missing after generation attempt".to_string())
+    }
 }
 
 #[tokio::main]
@@ -163,41 +175,52 @@ async fn main() {
     };
 
     // Try HTTPS first, fall back to HTTP if TLS cert generation fails
-    let (cert_path, key_path) = ensure_tls_cert();
+    match ensure_tls_cert() {
+        Ok((cert_path, key_path)) => {
+            // --- HTTPS on 443 + HTTP redirect on 3000 ---
+            let https_addr = SocketAddr::from(([0, 0, 0, 0], 443));
+            let http_addr = SocketAddr::from(([0, 0, 0, 0], 3000));
 
-    if Path::new(&cert_path).exists() && Path::new(&key_path).exists() {
-        // --- HTTPS on 443 + HTTP redirect on 3000 ---
-        let https_addr = SocketAddr::from(([0, 0, 0, 0], 443));
-        let http_addr = SocketAddr::from(([0, 0, 0, 0], 3000));
+            // HTTP redirect server on port 3000
+            let redirect_app = axum::Router::new().fallback(|req: axum::extract::Request| async move {
+                let host = req
+                    .headers()
+                    .get(header::HOST)
+                    .and_then(|h| h.to_str().ok())
+                    .unwrap_or("localhost");
+                // Strip port from host if present
+                let hostname = host.split(':').next().unwrap_or(host);
+                let path = req.uri().path();
+                let query = req.uri().query().map(|q| format!("?{}", q)).unwrap_or_default();
+                let redirect_url = format!("https://{}{}{}", hostname, path, query);
+                // Use 301 Moved Permanently (not 308) for broadest client compatibility
+                axum::response::Response::builder()
+                    .status(axum::http::StatusCode::MOVED_PERMANENTLY)
+                    .header(header::LOCATION, redirect_url)
+                    .body(axum::body::Body::empty())
+                    .unwrap()
+            });
 
-        // HTTP redirect server on port 3000
-        let redirect_app = axum::Router::new().fallback(|req: axum::extract::Request| async move {
-            let host = req
-                .headers()
-                .get(header::HOST)
-                .and_then(|h| h.to_str().ok())
-                .unwrap_or("localhost");
-            // Strip port from host if present
-            let hostname = host.split(':').next().unwrap_or(host);
-            let path = req.uri().path();
-            let query = req.uri().query().map(|q| format!("?{}", q)).unwrap_or_default();
-            let redirect_url = format!("https://{}{}{}", hostname, path, query);
-            // Use 301 Moved Permanently (not 308) for broadest client compatibility
-            axum::response::Response::builder()
-                .status(axum::http::StatusCode::MOVED_PERMANENTLY)
-                .header(header::LOCATION, redirect_url)
-                .body(axum::body::Body::empty())
-                .unwrap()
-        });
+            // Spawn HTTP redirect server
+            tokio::spawn(async move {
+                let listener = tokio::net::TcpListener::bind(http_addr).await.unwrap();
+                info!("HTTP redirect server listening on {} -> HTTPS", http_addr);
+                axum::serve(listener, redirect_app).await.unwrap();
+            });
 
-        // Spawn HTTP redirect server
-        tokio::spawn(async move {
-            let listener = tokio::net::TcpListener::bind(http_addr).await.unwrap();
-            info!("HTTP redirect server listening on {} -> HTTPS", http_addr);
-            axum::serve(listener, redirect_app).await.unwrap();
-        });
-
-        // Start HTTPS server
+            // Start HTTPS server
+            // ...existing code...
+        }
+        Err(e) => {
+            error!("TLS setup failed: {}. Starting HTTP only on port 3000", e);
+            let http_addr = SocketAddr::from(([0, 0, 0, 0], 3000));
+            axum::Server::bind(&http_addr)
+                .serve(app.into_make_service())
+                .await
+                .unwrap();
+            return;
+        }
+    }
         println!("QuickFW API listening on https://{}", https_addr);
         println!("HTTP redirect on http://{}", http_addr);
         info!("QuickFW HTTPS server listening on {}", https_addr);

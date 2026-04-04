@@ -19,6 +19,9 @@ pub struct NatConfig {
     /// DNAT rules (port forwarding from WAN to LAN hosts).
     #[serde(default)]
     pub port_forward: Vec<PortForwardRule>,
+    /// Source NAT (static SNAT — translate source to specific IP).
+    #[serde(default)]
+    pub snat: Vec<SnatRule>,
 }
 
 /// Masquerade rule for SNAT — translates source addresses for outbound traffic.
@@ -28,6 +31,18 @@ pub struct MasqueradeRule {
     pub out_interface: String,
     /// Source CIDR to masquerade (e.g., "192.168.1.0/24").
     pub source_cidr: String,
+}
+
+/// Source NAT rule — maps internal IP to specific external IP.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnatRule {
+    /// Source network/CIDR to translate.
+    pub source_cidr: String,
+    /// Translated source IP address.
+    pub to_address: String,
+    /// Outbound interface (optional, for interface-based SNAT).
+    #[serde(default)]
+    pub out_interface: String,
 }
 
 /// Port forwarding rule for DNAT — redirects inbound traffic to a LAN host.
