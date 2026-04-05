@@ -4,6 +4,7 @@ members = [
   "io",
   "ifmgr",
   "config",
+  "routing",
   "quickfw-api",
   "quickfw-cli",
   "quickfw-setup",

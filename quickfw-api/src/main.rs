@@ -209,48 +209,38 @@ async fn main() {
             });
 
             // Start HTTPS server
-            // ...existing code...
-        }
-        Err(e) => {
-            error!("TLS setup failed: {}. Starting HTTP only on port 3000", e);
-            let http_addr = SocketAddr::from(([0, 0, 0, 0], 3000));
-            axum::Server::bind(&http_addr)
-                .serve(app.into_make_service())
+            println!("QuickFW API listening on https://{}", https_addr);
+            println!("HTTP redirect on http://{}", http_addr);
+            info!("QuickFW HTTPS server listening on {}", https_addr);
+
+            let tls_config = axum_server::tls_rustls::RustlsConfig::from_pem_file(&cert_path, &key_path)
+                .await
+                .expect("Failed to load TLS certificate");
+
+            let handle = axum_server::Handle::new();
+            let shutdown_handle = handle.clone();
+            tokio::spawn(async move {
+                signal.await;
+                shutdown_handle.graceful_shutdown(Some(Duration::from_secs(5)));
+            });
+
+            axum_server::bind_rustls(https_addr, tls_config)
+                .handle(handle)
+                .serve(app.into_make_service_with_connect_info::<SocketAddr>())
                 .await
                 .unwrap();
-            return;
         }
-    }
-        println!("QuickFW API listening on https://{}", https_addr);
-        println!("HTTP redirect on http://{}", http_addr);
-        info!("QuickFW HTTPS server listening on {}", https_addr);
+        Err(e) => {
+            error!("TLS setup failed: {}. Falling back to HTTP on port 3000", e);
+            let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
+            println!("WARNING: TLS setup failed, falling back to HTTP on {}", addr);
+            info!("Listening on {} (HTTP fallback)", addr);
+            let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
 
-        let tls_config = axum_server::tls_rustls::RustlsConfig::from_pem_file(&cert_path, &key_path)
-            .await
-            .expect("Failed to load TLS certificate");
-
-        let handle = axum_server::Handle::new();
-        let shutdown_handle = handle.clone();
-        tokio::spawn(async move {
-            signal.await;
-            shutdown_handle.graceful_shutdown(Some(Duration::from_secs(5)));
-        });
-
-        axum_server::bind_rustls(https_addr, tls_config)
-            .handle(handle)
-            .serve(app.into_make_service_with_connect_info::<SocketAddr>())
-            .await
-            .unwrap();
-    } else {
-        // Fallback: plain HTTP (should only happen if openssl is missing)
-        let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
-        println!("WARNING: TLS certificate not available, falling back to HTTP on {}", addr);
-        info!("Listening on {} (HTTP fallback - TLS cert not available)", addr);
-        let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-
-        axum::serve(listener, app)
-            .with_graceful_shutdown(signal)
-            .await
-            .unwrap();
+            axum::serve(listener, app)
+                .with_graceful_shutdown(signal)
+                .await
+                .unwrap();
+        }
     }
 }

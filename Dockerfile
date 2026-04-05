@@ -228,4 +228,4 @@ HOME_URL="https://quickfw.io"
 OSREL
 
 # lb build needs --privileged (mount /proc, /dev/pts) so defer to runtime
-CMD ["bash", "-c", "lb build 2>&1 | tail -100 && cp /iso/live-image-amd64.hybrid.iso /output/quickfw.iso && echo 'ISO built successfully'"]
+CMD ["bash", "-c", "lb build 2>&1 | tail -100 && echo '--- ISO files found: ---' && find /iso -name '*.iso' -o -name '*.hybrid.iso' 2>/dev/null && ISO=$(find /iso -name '*.hybrid.iso' -o -name '*.iso' 2>/dev/null | head -1) && echo \"Copying $ISO\" && cp \"$ISO\" /output/quickfw.iso && echo 'ISO built successfully'"]

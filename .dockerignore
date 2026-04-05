@@ -1,0 +1,6 @@
+.git
+.vscode
+output
+target
+*.iso
+*.iso.sha256

@@ -1529,8 +1529,11 @@ fn cmd_config_nat_port_forward(state: &CliState, args: &[&str]) {
                 Ok(_) => print_ok(&format!(
                     "Port forward added: {} {} -> {} (if={})",
                     proto, port, dest, iface
-        )),
-        Err(e) => print_error(&e),
+                )),
+                Err(e) => print_error(&e),
+            }
+        }
+        Err(e) => print_error(&format!("Failed to fetch NAT config: {}", e)),
     }
 }
 
@@ -2049,7 +2052,7 @@ fn print_help(mode: &Mode) {
                 "Available commands:".bold().underline(),
                 proto
             );
-            match proto {
+            match proto.as_str() {
                 "ospf" => {
                     println!("    router-id <id>              Set OSPF router ID");
                     println!("    area <area-id>               Set OSPF area");
@@ -2362,51 +2365,6 @@ fn dispatch_config(state: &mut CliState, cmd: &str, parts: &[&str]) -> bool {
         }
         "no" => {
             if parts.len() < 2 {
-                print_error("Usage: no nat ... | no route ...");
-                return true;
-            }
-            match parts[1] {
-                "nat" => {
-                    if parts.len() < 4 {
-                        print_error("Usage: no nat masquerade <index> | no nat port-forward <index>");
-                        return true;
-                    }
-                    match parts[2] {
-                        "masquerade" => cmd_config_no_nat_masquerade(state, parts[3]),
-                        "port-forward" => cmd_config_no_nat_port_forward(state, parts[3]),
-                        _ => print_error(&format!("Unknown: no nat {}", parts[2])),
-                    }
-                }
-                "route" => {
-                    if parts.len() < 3 {
-                        print_error("Usage: no route <cidr>");
-                        return true;
-                    }
-                    cmd_config_no_route(state, parts[2]);
-                }
-                _ => print_error(&format!("Unknown: no {}", parts[1])),
-            }
-        }
-        "route" => {
-            cmd_config_route(state, &parts[1..]);
-        }
-        "router" => {
-            if parts.len() < 2 {
-                print_error("Usage: router ospf | router bgp");
-                return true;
-            }
-            match parts[1] {
-                "ospf" => {
-                    state.mode = Mode::ConfigRouter("ospf".to_string());
-                }
-                "bgp" => {
-                    state.mode = Mode::ConfigRouter("bgp".to_string());
-                }
-                _ => print_error("Usage: router ospf | router bgp"),
-            }
-        }
-        "no" => {
-            if parts.len() < 2 {
                 print_error("Usage: no nat ... | no route ... | no router ...");
                 return true;
             }
@@ -2437,6 +2395,24 @@ fn dispatch_config(state: &mut CliState, cmd: &str, parts: &[&str]) -> bool {
                     cmd_no_router(state, parts[2]);
                 }
                 _ => print_error(&format!("Unknown: no {}", parts[1])),
+            }
+        }
+        "route" => {
+            cmd_config_route(state, &parts[1..]);
+        }
+        "router" => {
+            if parts.len() < 2 {
+                print_error("Usage: router ospf | router bgp");
+                return true;
+            }
+            match parts[1] {
+                "ospf" => {
+                    state.mode = Mode::ConfigRouter("ospf".to_string());
+                }
+                "bgp" => {
+                    state.mode = Mode::ConfigRouter("bgp".to_string());
+                }
+                _ => print_error("Usage: router ospf | router bgp"),
             }
         }
         "show" => {

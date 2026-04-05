@@ -12,7 +12,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+PROJECT_ROOT="$SCRIPT_DIR"
 OUTPUT_DIR="$SCRIPT_DIR/output"
 
 RED='\033[0;31m'
@@ -51,9 +51,11 @@ docker build \
 
 # Step 2: Run the builder container
 log "Step 2/3: Running ISO build (this may take 10-30 minutes)..."
+export MSYS_NO_PATHCONV=1
 docker run --rm --privileged \
     -v "$OUTPUT_DIR:/output" \
     quickfw-iso-builder
+unset MSYS_NO_PATHCONV
 
 # Step 3: Verify output
 if [ -f "$OUTPUT_DIR/quickfw.iso" ]; then

@@ -13,7 +13,7 @@ This document provides everything an AI coding agent needs to know about the Qui
 - A **REST API** for automation and for the CLI to consume.
 - **Default-deny firewall** semantics (INPUT DROP, FORWARD DROP).
 - **NAT** (masquerade + port forwarding) via nftables.
-- **Interface management** with WAN/LAN/DMZ role assignments.
+- **Interface management** with WAN/LAN role assignments.
 - **DHCP/DNS** server for the LAN via dnsmasq.
 - **OSPF / BGP / RIP** routing protocol support via FRR.
 
@@ -45,10 +45,10 @@ This is a Cargo workspace. The root `Cargo.toml` lists the following members:
 | `io` | `lib` (package `io`, imported as `gfw-io`) | Packet I/O abstraction, NFQUEUE integration, nftables script generation for firewall & NAT |
 | `ifmgr` | `lib` (package `ifmgr`, imported as `gfw-ifmgr`) | Network interface discovery, WAN/LAN configuration, dnsmasq config generation |
 | `config` | `lib` | YAML configuration parsing for generic CLI configs |
+| `routing` | `lib` | OSPF, BGP, RIP config models and FRR config generation |
 | `quickfw-api` | `quickfw-api` | Axum REST API server and static web UI host |
 | `quickfw-cli` | `quickfw` | Cisco-style interactive CLI (talks to the API) |
 | `quickfw-setup` | `quickfw-setup` | First-boot TUI wizard for appliance setup |
-| `routing` | `lib` | OSPF, BGP, RIP config models and FRR config generation |
 
 Additional directories:
 
@@ -178,7 +178,56 @@ Prerequisites for integration tests:
 
 ---
 
-## 11. Quick Reference
+## 11. API Endpoints Overview
+
+The REST API is organized into these categories:
+
+### System & Interfaces
+- `GET /api/system/info` — Hostname, version, uptime, CPU, memory, load
+- `GET /api/system/traffic` — Connection counts, RX/TX stats
+- `POST /api/system/reboot` — Reboot (requires password confirmation)
+- `GET /api/interfaces` — List all interfaces with stats
+- `PUT /api/interfaces/{name}` — Configure interface
+
+### Firewall
+- `GET /api/firewall` — Get firewall config (rules, policies, zones)
+- `POST /api/firewall` — Apply firewall config
+- `GET /api/firewall/counters` — Rule hit counters
+- `GET /api/firewall/groups` — Address/port groups
+- `POST /api/firewall/groups` — Save groups
+
+### NAT
+- `GET /api/nat` — Get NAT config (masquerade, port-forward)
+- `POST /api/nat` — Apply NAT config
+- `DELETE /api/nat/masquerade/{index}` — Remove masquerade rule
+- `DELETE /api/nat/port_forward/{index}` — Remove port-forward rule
+
+### Routing
+- `GET /api/routes` — Static routes
+- `POST /api/routes` — Add route
+- `DELETE /api/routes/{cidr}` — Remove route
+- `GET /api/routing/ospf` — OSPF config/status
+- `POST /api/routing/ospf` — Configure OSPF
+- `GET /api/routing/bgp` — BGP config/status
+- `POST /api/routing/bgp` — Configure BGP
+
+### Tools & Monitoring
+- `GET /api/conntrack` — Active connections
+- `GET /api/tools/arp` — ARP table
+- `GET /api/tools/dhcp-leases` — DHCP leases
+- `POST /api/tools/ping` — Ping host
+- `POST /api/tools/traceroute` — Traceroute
+
+### Auth & Admin
+- `POST /api/auth/login` — Session login
+- `POST /api/auth/logout` — Session logout
+- `POST /api/auth/password` — Change password
+- `GET /api/audit` — Audit log entries
+- `GET /api/config/export` — Export full config
+
+---
+
+## 12. Quick Reference
 
 ```bash
 # Build all binaries
