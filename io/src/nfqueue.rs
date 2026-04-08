@@ -594,7 +594,7 @@ impl PacketIO for NFQueuePacketIO {
         // Downcast the Packet trait to NFQueuePacket.
         let mut nfq_packet = packet
             .downcast::<NFQueuePacket>()
-            .expect("Invalid NFQueuePacket");
+            .map_err(|_| "Invalid packet type: expected NFQueuePacket")?;
 
         debug!("Setting the verdict to {:?}", &verdict);
         match verdict {
@@ -658,13 +658,20 @@ impl PacketIO for NFQueuePacketIO {
         // This is done using the `setsockopt` system call with the `SO_MARK` option.
         unsafe {
             let fd = socket.as_raw_fd();
-            let _ = libc::setsockopt(
+            let ret = libc::setsockopt(
                 fd,
                 libc::SOL_SOCKET,
                 libc::SO_MARK,
                 &(NFQUEUE_CONN_MARK_ACCEPT as libc::c_int) as *const _ as *const libc::c_void,
                 std::mem::size_of::<libc::c_int>() as libc::socklen_t,
             );
+            if ret != 0 {
+                return Err(format!(
+                    "setsockopt SO_MARK failed: {}",
+                    std::io::Error::last_os_error()
+                )
+                .into());
+            }
         }
 
         // Connect the socket to the specified address.

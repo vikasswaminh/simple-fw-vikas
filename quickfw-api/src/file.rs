@@ -38,6 +38,9 @@ async fn serve_static_file(
     Path(filename): Path<String>,
 ) -> Result<axum::response::Response<axum::body::Body>, axum::http::StatusCode> {
     // Only allow safe filenames — no path traversal
+    if filename.contains("..") || filename.starts_with('.') {
+        return Err(axum::http::StatusCode::BAD_REQUEST);
+    }
     if !filename
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
@@ -77,6 +80,9 @@ async fn serve_font(
     Path(filename): Path<String>,
 ) -> Result<axum::response::Response<axum::body::Body>, axum::http::StatusCode> {
     // Only allow known font filenames — no path traversal
+    if filename.contains("..") || filename.starts_with('.') {
+        return Err(axum::http::StatusCode::BAD_REQUEST);
+    }
     if !filename
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')

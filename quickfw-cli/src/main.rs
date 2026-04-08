@@ -1481,10 +1481,13 @@ fn cmd_config_nat_masquerade(state: &CliState, args: &[&str]) {
             if config.get("masquerade").is_none() {
                 config["masquerade"] = json!([]);
             }
-            config["masquerade"].as_array_mut().unwrap().push(json!({
-                "out_interface": iface,
-                "source_cidr": source
-            }));
+            match config["masquerade"].as_array_mut() {
+                Some(arr) => arr.push(json!({
+                    "out_interface": iface,
+                    "source_cidr": source
+                })),
+                None => { print_error("Invalid config: masquerade is not an array"); return; }
+            }
             match state.api_post("/api/nat", &config) {
                 Ok(_) => print_ok(&format!(
                     "Masquerade added: interface={}, source={}",
@@ -1519,12 +1522,15 @@ fn cmd_config_nat_port_forward(state: &CliState, args: &[&str]) {
             if config.get("port_forward").is_none() {
                 config["port_forward"] = json!([]);
             }
-            config["port_forward"].as_array_mut().unwrap().push(json!({
-                "protocol": proto,
-                "dest_port": port,
-                "forward_to": dest,
-                "in_interface": iface
-            }));
+            match config["port_forward"].as_array_mut() {
+                Some(arr) => arr.push(json!({
+                    "protocol": proto,
+                    "dest_port": port,
+                    "forward_to": dest,
+                    "in_interface": iface
+                })),
+                None => { print_error("Invalid config: port_forward is not an array"); return; }
+            }
             match state.api_post("/api/nat", &config) {
                 Ok(_) => print_ok(&format!(
                     "Port forward added: {} {} -> {} (if={})",
@@ -1617,7 +1623,10 @@ fn cmd_config_router_ospf(state: &CliState, args: &[&str]) {
                 if config.get("networks").is_none() {
                     config["networks"] = json!([]);
                 }
-                config["networks"].as_array_mut().unwrap().push(json!({"network": arg[1]}));
+                match config["networks"].as_array_mut() {
+                    Some(arr) => arr.push(json!({"network": arg[1]})),
+                    None => { print_error("Invalid config: networks is not an array"); return; }
+                }
             }
             _ => {}
         }
@@ -1664,10 +1673,13 @@ fn cmd_config_router_bgp(state: &CliState, args: &[&str]) {
                 if config.get("neighbors").is_none() {
                     config["neighbors"] = json!([]);
                 }
-                config["neighbors"].as_array_mut().unwrap().push(json!({
-                    "ip_address": neighbor_ip,
-                    "remote_as": remote_as
-                }));
+                match config["neighbors"].as_array_mut() {
+                    Some(arr) => arr.push(json!({
+                        "ip_address": neighbor_ip,
+                        "remote_as": remote_as
+                    })),
+                    None => { print_error("Invalid config: neighbors is not an array"); return; }
+                }
                 i += 4;
             } else {
                 i += 2;
@@ -1870,7 +1882,10 @@ fn cmd_fw_rule_apply(state: &CliState, rule: &FirewallRuleBuilder) {
             
             // Convert rule builder to rule object
             let rule_json = rule.to_json();
-            let rules = config["rules"].as_array_mut().unwrap();
+            let rules = match config["rules"].as_array_mut() {
+                Some(arr) => arr,
+                None => { print_error("Invalid config: rules is not an array"); return; }
+            };
             
             // Check if rule exists (update) or is new (insert)
             let mut found = false;

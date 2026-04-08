@@ -7,6 +7,8 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 use std::path::Path;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 
 use axum::http::{header, HeaderValue};
 use tracing::{error, info};
@@ -81,6 +83,7 @@ struct Cli {
 }
 
 /// Generate a self-signed TLS certificate if none exists.
+/// Uses temp files and atomic move to avoid leaving partially-created files with wrong permissions.
 fn ensure_tls_cert() -> Result<(String, String), String> {
     let cert_path = "/etc/quickfw/tls.crt";
     let key_path = "/etc/quickfw/tls.key";
@@ -95,6 +98,15 @@ fn ensure_tls_cert() -> Result<(String, String), String> {
         error!("Failed to create /etc/quickfw directory: {}", e);
         return Err(format!("Failed to create /etc/quickfw: {}", e));
     }
+
+    // Use temp files to avoid leaving partially-created files
+    let temp_cert = "/etc/quickfw/tls.crt.tmp";
+    let temp_key = "/etc/quickfw/tls.key.tmp";
+
+    // Clean up any stale temp files
+    let _ = std::fs::remove_file(temp_cert);
+    let _ = std::fs::remove_file(temp_key);
+
     let output = std::process::Command::new("openssl")
         .args([
             "req",
@@ -105,9 +117,9 @@ fn ensure_tls_cert() -> Result<(String, String), String> {
             "ec_paramgen_curve:prime256v1",
             "-nodes",
             "-keyout",
-            key_path,
+            temp_key,
             "-out",
-            cert_path,
+            temp_cert,
             "-days",
             "3650",
             "-subj",
@@ -117,18 +129,40 @@ fn ensure_tls_cert() -> Result<(String, String), String> {
 
     match output {
         Ok(o) if o.status.success() => {
-            // Set restrictive permissions on key file
-            if let Err(e) = std::process::Command::new("chmod").args(["600", key_path]).output() {
-                error!("Failed to chmod key file: {}", e);
-                return Err(format!("Failed to chmod key file: {}", e));
+            // Set restrictive permissions on key file BEFORE moving to final location
+            if let Err(e) = std::fs::set_permissions(temp_key, std::fs::Permissions::from_mode(0o600)) {
+                let _ = std::fs::remove_file(temp_key);
+                let _ = std::fs::remove_file(temp_cert);
+                error!("Failed to set key file permissions: {}", e);
+                return Err(format!("Failed to set key file permissions: {}", e));
             }
-            if let Err(e) = std::process::Command::new("chmod").args(["644", cert_path]).output() {
-                error!("Failed to chmod cert file: {}", e);
-                return Err(format!("Failed to chmod cert file: {}", e));
+            if let Err(e) = std::fs::set_permissions(temp_cert, std::fs::Permissions::from_mode(0o644)) {
+                let _ = std::fs::remove_file(temp_key);
+                let _ = std::fs::remove_file(temp_cert);
+                error!("Failed to set cert file permissions: {}", e);
+                return Err(format!("Failed to set cert file permissions: {}", e));
             }
+
+            // Atomic move to final location
+            if let Err(e) = std::fs::rename(temp_key, key_path) {
+                let _ = std::fs::remove_file(temp_key);
+                let _ = std::fs::remove_file(temp_cert);
+                error!("Failed to move key file: {}", e);
+                return Err(format!("Failed to move key file: {}", e));
+            }
+            if let Err(e) = std::fs::rename(temp_cert, cert_path) {
+                // Try to rollback key file
+                let _ = std::fs::remove_file(key_path);
+                let _ = std::fs::remove_file(temp_cert);
+                error!("Failed to move cert file: {}", e);
+                return Err(format!("Failed to move cert file: {}", e));
+            }
+
             info!("Self-signed TLS certificate generated successfully");
         }
         Ok(o) => {
+            let _ = std::fs::remove_file(temp_key);
+            let _ = std::fs::remove_file(temp_cert);
             error!(
                 "Failed to generate TLS certificate: {}",
                 String::from_utf8_lossy(&o.stderr)
@@ -136,6 +170,8 @@ fn ensure_tls_cert() -> Result<(String, String), String> {
             return Err(format!("Failed to generate TLS certificate: {}", String::from_utf8_lossy(&o.stderr)));
         }
         Err(e) => {
+            let _ = std::fs::remove_file(temp_key);
+            let _ = std::fs::remove_file(temp_cert);
             error!("Failed to run openssl: {}", e);
             return Err(format!("Failed to run openssl: {}", e));
         }
@@ -169,7 +205,7 @@ async fn main() {
 
     // ctrl c
     let signal = async move {
-        tokio::signal::ctrl_c().await.unwrap();
+        tokio::signal::ctrl_c().await.expect("Failed to listen for ctrl_c signal");
         info!("Received ctrl_c, shutting down...");
         println!("Shutting down...");
     };
@@ -203,9 +239,11 @@ async fn main() {
 
             // Spawn HTTP redirect server
             tokio::spawn(async move {
-                let listener = tokio::net::TcpListener::bind(http_addr).await.unwrap();
+                let listener = tokio::net::TcpListener::bind(http_addr).await
+                    .expect("Failed to bind HTTP redirect server");
                 info!("HTTP redirect server listening on {} -> HTTPS", http_addr);
-                axum::serve(listener, redirect_app).await.unwrap();
+                axum::serve(listener, redirect_app).await
+                    .expect("HTTP redirect server failed");
             });
 
             // Start HTTPS server
@@ -228,19 +266,20 @@ async fn main() {
                 .handle(handle)
                 .serve(app.into_make_service_with_connect_info::<SocketAddr>())
                 .await
-                .unwrap();
+                .expect("HTTPS server failed");
         }
         Err(e) => {
             error!("TLS setup failed: {}. Falling back to HTTP on port 3000", e);
             let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
             println!("WARNING: TLS setup failed, falling back to HTTP on {}", addr);
             info!("Listening on {} (HTTP fallback)", addr);
-            let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+            let listener = tokio::net::TcpListener::bind(addr).await
+                .expect("Failed to bind HTTP server");
 
             axum::serve(listener, app)
                 .with_graceful_shutdown(signal)
                 .await
-                .unwrap();
+                .expect("HTTP server failed");
         }
     }
 }

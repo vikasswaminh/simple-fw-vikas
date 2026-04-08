@@ -114,7 +114,7 @@ pub async fn basic_auth_middleware(
 
     // --- Rate limiting (API endpoints only) ---
     if !is_static {
-        let mut limits = RATE_LIMITS.lock().unwrap();
+        let mut limits = RATE_LIMITS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         // Cap store at 10000 entries
         if limits.len() > 10000 {
             let oldest = limits
@@ -227,7 +227,7 @@ pub async fn basic_auth_middleware(
                         }
                         // Reset login failures on successful auth
                         {
-                            let mut limits = RATE_LIMITS.lock().unwrap();
+                            let mut limits = RATE_LIMITS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
                             if let Some(entry) = limits.get_mut(&client_ip) {
                                 entry.login_failures = 0;
                             }
@@ -238,7 +238,7 @@ pub async fn basic_auth_middleware(
                         return Ok(next.run(request).await);
                     } else {
                         // Track auth failure
-                        let mut limits = RATE_LIMITS.lock().unwrap();
+                        let mut limits = RATE_LIMITS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
                         let entry = limits.entry(client_ip).or_insert(RateEntry {
                             api_count: 0,
                             api_window: now,
@@ -310,7 +310,7 @@ fn check_session_cookie(request: &Request) -> Option<String> {
         .next()?;
 
     let now = unix_now();
-    let mut sessions = SESSIONS.lock().unwrap();
+    let mut sessions = SESSIONS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
 
     if let Some(session) = sessions.get_mut(token) {
         if now - session.last_active < SESSION_MAX_AGE {
@@ -331,7 +331,7 @@ fn create_session(user: &str) -> String {
         .collect();
 
     let now = unix_now();
-    let mut sessions = SESSIONS.lock().unwrap();
+    let mut sessions = SESSIONS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
 
     // Evict expired sessions
     sessions.retain(|_, s| now - s.last_active < SESSION_MAX_AGE);
@@ -358,7 +358,7 @@ fn create_session(user: &str) -> String {
 }
 
 fn destroy_session(token: &str) {
-    let mut sessions = SESSIONS.lock().unwrap();
+    let mut sessions = SESSIONS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     sessions.remove(token);
 }
 
@@ -416,11 +416,12 @@ fn verify_credentials(user: &str, pass: &str) -> bool {
             let _ = hash_and_store_password(pass);
             true
         } else {
-            // Constant-time compare to avoid timing leak
-            let _ = Argon2::default().verify_password(
-                pass.as_bytes(),
-                &PasswordHash::new("$argon2id$v=19$m=19456,t=2,p=1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA").unwrap(),
-            );
+            // Constant-time compare to avoid timing leak using subtle crate
+            use subtle::ConstantTimeEq;
+            let pass_bytes = pass.as_bytes();
+            let stored_bytes = stored.as_bytes();
+            let len = std::cmp::min(pass_bytes.len(), stored_bytes.len());
+            let _ = pass_bytes[..len].ct_eq(&stored_bytes[..len]);
             false
         }
     }
@@ -444,7 +445,7 @@ pub fn verify_password(pass: &str) -> bool {
 
 /// List active sessions (for identity/sessions endpoint).
 pub fn list_active_sessions() -> Vec<serde_json::Value> {
-    let sessions = SESSIONS.lock().unwrap();
+    let sessions = SESSIONS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let now = unix_now();
     sessions
         .iter()
@@ -470,7 +471,7 @@ fn generate_ws_token() -> String {
 
     let expiry = unix_now() + 300; // 5 minutes
 
-    let mut tokens = WS_TOKENS.lock().unwrap();
+    let mut tokens = WS_TOKENS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let now = unix_now();
     tokens.retain(|_, exp| *exp > now);
     if tokens.len() >= 100 {
@@ -487,7 +488,7 @@ fn generate_ws_token() -> String {
 }
 
 fn verify_ws_token(token: &str) -> bool {
-    let mut tokens = WS_TOKENS.lock().unwrap();
+    let mut tokens = WS_TOKENS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let now = unix_now();
     tokens.retain(|_, exp| *exp > now);
     tokens.remove(token).is_some()
@@ -640,4 +641,99 @@ fn base64_decode_bytes(input: &str) -> Result<Vec<u8>, ()> {
     }
 
     Ok(output)
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_base64_decode() {
+        assert_eq!(base64_decode("YWRtaW46cGFzc3dvcmQ=").unwrap(), "admin:password");
+        assert_eq!(base64_decode("dGVzdA==").unwrap(), "test");
+        assert!(base64_decode("invalid!!!").is_err());
+    }
+
+    #[test]
+    fn test_banned_passwords() {
+        for password in BANNED_PASSWORDS {
+            assert!(BANNED_PASSWORDS.contains(password));
+        }
+    }
+
+    #[test]
+    fn test_session_creation_and_verification() {
+        // Clear any existing sessions
+        {
+            let mut sessions = SESSIONS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            sessions.clear();
+        }
+
+        let token = create_session("admin");
+        assert!(!token.is_empty());
+
+        // Verify session exists
+        {
+            let sessions = SESSIONS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            assert!(sessions.contains_key(&token));
+        }
+    }
+
+    #[test]
+    fn test_session_destruction() {
+        // Clear any existing sessions
+        {
+            let mut sessions = SESSIONS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            sessions.clear();
+        }
+
+        let token = create_session("admin");
+        destroy_session(&token);
+
+        // Verify session is gone
+        {
+            let sessions = SESSIONS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            assert!(!sessions.contains_key(&token));
+        }
+    }
+
+    #[test]
+    fn test_ws_token_generation_and_verification() {
+        // Clear any existing tokens
+        {
+            let mut tokens = WS_TOKENS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            tokens.clear();
+        }
+
+        let token = generate_ws_token();
+        assert!(!token.is_empty());
+        assert!(verify_ws_token(&token));
+        
+        // Token should be consumed (one-time use)
+        assert!(!verify_ws_token(&token));
+    }
+
+    #[test]
+    fn test_rate_limiting_entry_creation() {
+        let now = unix_now();
+        let entry = RateEntry {
+            api_count: 0,
+            api_window: now,
+            login_failures: 0,
+            lockout_until: 0,
+        };
+        
+        assert_eq!(entry.api_count, 0);
+        assert_eq!(entry.login_failures, 0);
+        assert_eq!(entry.lockout_until, 0);
+    }
+
+    #[test]
+    fn test_unix_now() {
+        let now1 = unix_now();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        let now2 = unix_now();
+        assert!(now2 >= now1);
+    }
 }

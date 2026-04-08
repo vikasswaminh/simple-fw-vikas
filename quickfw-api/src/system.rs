@@ -913,12 +913,28 @@ struct ConfigImport {
     routes: Option<serde_json::Value>,
 }
 
+/// Config import transaction - validates all sections before writing any files
+struct ConfigTransaction {
+    firewall: Option<String>,
+    nat: Option<String>,
+    settings: Option<String>,
+    roles: Option<String>,
+    routes: Option<String>,
+}
+
 async fn import_config(
     Json(config): Json<ConfigImport>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     let mut imported = Vec::new();
+    let mut transaction = ConfigTransaction {
+        firewall: None,
+        nat: None,
+        settings: None,
+        roles: None,
+        routes: None,
+    };
 
-    // Validate and import each section
+    // Phase 1: Validate and serialize all sections to memory first
     if let Some(ref fw) = config.firewall {
         let fw_config: gfw_io::firewall::FirewallConfig =
             serde_json::from_value(fw.clone()).map_err(|e| {
@@ -933,19 +949,12 @@ async fn import_config(
                 Json(serde_json::json!({"error": format!("Firewall validation: {}", e)})),
             ));
         }
-        let _ = crate::config_utils::backup_config(FIREWALL_PATH);
-        let yaml = serde_yaml::to_string(&fw_config).map_err(|e| {
+        transaction.firewall = Some(serde_yaml::to_string(&fw_config).map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({"error": format!("Serialize: {}", e)})),
             )
-        })?;
-        crate::config_utils::atomic_write(FIREWALL_PATH, &yaml).map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": format!("Write: {}", e)})),
-            )
-        })?;
+        })?);
         imported.push("firewall");
     }
 
@@ -963,71 +972,90 @@ async fn import_config(
                 Json(serde_json::json!({"error": format!("NAT validation: {}", e)})),
             ));
         }
-        let _ = crate::config_utils::backup_config(NAT_PATH);
-        let yaml = serde_yaml::to_string(&nat_config).map_err(|e| {
+        transaction.nat = Some(serde_yaml::to_string(&nat_config).map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({"error": format!("Serialize: {}", e)})),
             )
-        })?;
-        crate::config_utils::atomic_write(NAT_PATH, &yaml).map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": format!("Write: {}", e)})),
-            )
-        })?;
+        })?);
         imported.push("nat");
     }
 
     if let Some(ref settings) = config.settings {
-        let _ = crate::config_utils::backup_config(SETTINGS_PATH);
-        let yaml = serde_yaml::to_string(settings).map_err(|e| {
+        transaction.settings = Some(serde_yaml::to_string(settings).map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({"error": format!("Serialize: {}", e)})),
             )
-        })?;
-        crate::config_utils::atomic_write(SETTINGS_PATH, &yaml).map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": format!("Write: {}", e)})),
-            )
-        })?;
+        })?);
         imported.push("settings");
     }
 
     if let Some(ref roles) = config.roles {
-        let _ = crate::config_utils::backup_config(ROLES_PATH);
-        let yaml = serde_yaml::to_string(roles).map_err(|e| {
+        transaction.roles = Some(serde_yaml::to_string(roles).map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({"error": format!("Serialize: {}", e)})),
             )
-        })?;
-        crate::config_utils::atomic_write(ROLES_PATH, &yaml).map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": format!("Write: {}", e)})),
-            )
-        })?;
+        })?);
         imported.push("roles");
     }
 
     if let Some(ref routes) = config.routes {
-        let _ = crate::config_utils::backup_config(ROUTES_PATH);
-        let yaml = serde_yaml::to_string(routes).map_err(|e| {
+        transaction.routes = Some(serde_yaml::to_string(routes).map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({"error": format!("Serialize: {}", e)})),
             )
-        })?;
-        crate::config_utils::atomic_write(ROUTES_PATH, &yaml).map_err(|e| {
+        })?);
+        imported.push("routes");
+    }
+
+    // Phase 2: Create backups and write all files atomically
+    if let Some(ref yaml) = transaction.firewall {
+        let _ = crate::config_utils::backup_config(FIREWALL_PATH);
+        crate::config_utils::atomic_write(FIREWALL_PATH, yaml).map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": format!("Write: {}", e)})),
+                Json(serde_json::json!({"error": format!("Write firewall: {}", e)})),
             )
         })?;
-        imported.push("routes");
+    }
+    if let Some(ref yaml) = transaction.nat {
+        let _ = crate::config_utils::backup_config(NAT_PATH);
+        crate::config_utils::atomic_write(NAT_PATH, yaml).map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": format!("Write NAT: {}", e)})),
+            )
+        })?;
+    }
+    if let Some(ref yaml) = transaction.settings {
+        let _ = crate::config_utils::backup_config(SETTINGS_PATH);
+        crate::config_utils::atomic_write(SETTINGS_PATH, yaml).map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": format!("Write settings: {}", e)})),
+            )
+        })?;
+    }
+    if let Some(ref yaml) = transaction.roles {
+        let _ = crate::config_utils::backup_config(ROLES_PATH);
+        crate::config_utils::atomic_write(ROLES_PATH, yaml).map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": format!("Write roles: {}", e)})),
+            )
+        })?;
+    }
+    if let Some(ref yaml) = transaction.routes {
+        let _ = crate::config_utils::backup_config(ROUTES_PATH);
+        crate::config_utils::atomic_write(ROUTES_PATH, yaml).map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": format!("Write routes: {}", e)})),
+            )
+        })?;
     }
 
     info!("Config imported: {:?}", imported);
@@ -1269,6 +1297,21 @@ async fn save_syslog_config(
                 Json(serde_json::json!({"error": "Syslog protocol must be udp or tcp"})),
             ));
         }
+    }
+    // Validate facility against RFC 3164/5424 values
+    const VALID_FACILITIES: &[&str] = &[
+        "auth", "authpriv", "cron", "daemon", "ftp", "kern", "lpr", "mail",
+        "news", "syslog", "user", "uucp", "local0", "local1", "local2",
+        "local3", "local4", "local5", "local6", "local7",
+    ];
+    if !VALID_FACILITIES.contains(&config.facility.as_str()) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": format!("Invalid syslog facility: {}", config.facility),
+                "valid_facilities": VALID_FACILITIES,
+            })),
+        ));
     }
 
     let yaml = serde_yaml::to_string(&config).map_err(|e| {

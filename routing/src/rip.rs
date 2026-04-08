@@ -61,9 +61,8 @@ pub fn validate_rip_config(config: &RipConfig) -> Result<(), String> {
         }
         // Validate router_id is a valid IP
         if let Some(rid) = &config.router_id {
-            if !rid.contains('.') {
-                return Err("RIP router ID must be a valid IP address".to_string());
-            }
+            rid.parse::<std::net::IpAddr>()
+                .map_err(|_| "RIP router ID must be a valid IP address".to_string())?;
         }
     }
     Ok(())

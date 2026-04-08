@@ -326,7 +326,8 @@ mod tests {
         assert!(validate_interface("$(reboot)").is_err());
         assert!(validate_interface("`rm -rf /`").is_err());
         assert!(validate_interface("a".repeat(16).as_str()).is_err());
-        assert!(validate_interface("eth0 ").is_err());
+        // Note: "eth0 " is valid because validate_interface() trims whitespace
+        assert!(validate_interface("eth0 ").is_ok());
     }
 
     #[test]

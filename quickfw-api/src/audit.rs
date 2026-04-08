@@ -40,7 +40,7 @@ pub fn create_router() -> Router {
 }
 
 async fn get_audit_log() -> Json<Vec<AuditEntry>> {
-    let log = AUDIT_LOG.lock().unwrap();
+    let log = AUDIT_LOG.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     Json(log.iter().rev().cloned().collect())
 }
 
@@ -77,7 +77,7 @@ pub async fn audit_middleware(request: Request, next: Next) -> Response {
         }
 
         // Store in memory ring buffer
-        let mut log = AUDIT_LOG.lock().unwrap();
+        let mut log = AUDIT_LOG.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         if log.len() >= MAX_AUDIT_ENTRIES {
             log.pop_front();
         }
