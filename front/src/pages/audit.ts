@@ -3,20 +3,23 @@ import { auditApi } from '@api/endpoints';
 import type { AuditEntry } from '@schemas';
 import { formatTime } from '@utils';
 
-/**
- * Audit Log Page Component
- */
 export class AuditPage extends Component<{
   entries: AuditEntry[];
+  filtered: AuditEntry[];
   loading: boolean;
   error: string | null;
+  filterMethod: string;
+  filterUser: string;
+  filterStatus: string;
+  page: number;
+  perPage: number;
 }> {
   constructor(element: HTMLElement | string) {
     super(element);
     this.state = {
-      entries: [],
-      loading: true,
-      error: null,
+      entries: [], filtered: [], loading: true, error: null,
+      filterMethod: '', filterUser: '', filterStatus: '',
+      page: 1, perPage: 20,
     };
   }
 
@@ -27,90 +30,155 @@ export class AuditPage extends Component<{
   private async loadData(): Promise<void> {
     try {
       const entries = await auditApi.getLog();
-      this.setState({ entries, loading: false });
+      this.setState({ entries, filtered: entries, loading: false });
+      this.applyFilters();
     } catch (error) {
-      console.error('Failed to load audit log:', error);
-      this.setState({
-        error: error instanceof Error ? error.message : 'Failed to load audit log',
-        loading: false,
-      });
+      this.setState({ error: error instanceof Error ? error.message : 'Failed to load', loading: false });
     }
   }
 
+  private applyFilters(): void {
+    let filtered = [...this.state.entries];
+    const { filterMethod, filterUser, filterStatus } = this.state;
+    if (filterMethod) filtered = filtered.filter((e: AuditEntry) => e.method === filterMethod);
+    if (filterUser) filtered = filtered.filter((e: AuditEntry) => e.user === filterUser);
+    if (filterStatus === '2xx') filtered = filtered.filter((e: AuditEntry) => e.status >= 200 && e.status < 300);
+    else if (filterStatus === '4xx') filtered = filtered.filter((e: AuditEntry) => e.status >= 400 && e.status < 500);
+    else if (filterStatus === '5xx') filtered = filtered.filter((e: AuditEntry) => e.status >= 500);
+    this.setState({ filtered, page: 1 });
+  }
+
+  private exportData(format: 'csv' | 'json'): void {
+    const data = this.state.filtered;
+    let content: string;
+    let mime: string;
+    let ext: string;
+
+    if (format === 'json') {
+      content = JSON.stringify(data, null, 2);
+      mime = 'application/json';
+      ext = 'json';
+    } else {
+      const headers = 'timestamp,method,endpoint,user,source_ip,status\n';
+      content = headers + data.map((e: AuditEntry) => `${e.timestamp},${e.method},${e.endpoint},${e.user},${e.source_ip},${e.status}`).join('\n');
+      mime = 'text/csv';
+      ext = 'csv';
+    }
+
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `audit-log.${ext}`; a.click();
+    URL.revokeObjectURL(url);
+  }
+
   render(): void {
-    const { entries, loading, error } = this.state;
+    const { filtered, loading, error, page, perPage, filterMethod, filterStatus } = this.state;
 
     if (loading) {
-      this.element.innerHTML = `
-        <div class="loading">
-          <div class="spinner"></div>
-          <span>Loading audit log...</span>
-        </div>
-      `;
+      this.element.innerHTML = `<div class="loading"><div class="spinner"></div> Loading...</div>`;
       return;
     }
 
+    const totalPages = Math.ceil(filtered.length / perPage);
+    const pageData = filtered.slice((page - 1) * perPage, page * perPage);
+    const users = [...new Set(this.state.entries.map((e: AuditEntry) => e.user))];
+
     this.element.innerHTML = `
+      <div class="page-header">
+        <h1 class="page-title">Audit Log</h1>
+        <div class="page-actions">
+          <span class="badge badge-outline">${filtered.length} entries</span>
+          <button id="csv-btn" class="btn btn-secondary btn-sm">CSV</button>
+          <button id="json-btn" class="btn btn-secondary btn-sm">JSON</button>
+          <button id="refresh-btn" class="btn btn-secondary">↻ Refresh</button>
+        </div>
+      </div>
+
       <div class="card">
-        <div class="card-header">
-          <h3 class="card-title">Audit Log</h3>
-          <button id="refresh-btn" class="btn btn-secondary">Refresh</button>
+        <!-- Filters -->
+        <div style="display: flex; gap: var(--spacing-sm); margin-bottom: var(--spacing-md); flex-wrap: wrap;">
+          <select class="form-select" id="filter-method" style="width: 120px;">
+            <option value="" ${!filterMethod ? 'selected' : ''}>All Methods</option>
+            <option value="GET" ${filterMethod === 'GET' ? 'selected' : ''}>GET</option>
+            <option value="POST" ${filterMethod === 'POST' ? 'selected' : ''}>POST</option>
+            <option value="PUT" ${filterMethod === 'PUT' ? 'selected' : ''}>PUT</option>
+            <option value="DELETE" ${filterMethod === 'DELETE' ? 'selected' : ''}>DELETE</option>
+          </select>
+          <select class="form-select" id="filter-user" style="width: 140px;">
+            <option value="">All Users</option>
+            ${users.map(u => `<option value="${u}">${u}</option>`).join('')}
+          </select>
+          <select class="form-select" id="filter-status" style="width: 130px;">
+            <option value="" ${!filterStatus ? 'selected' : ''}>All Status</option>
+            <option value="2xx" ${filterStatus === '2xx' ? 'selected' : ''}>2xx Success</option>
+            <option value="4xx" ${filterStatus === '4xx' ? 'selected' : ''}>4xx Error</option>
+            <option value="5xx" ${filterStatus === '5xx' ? 'selected' : ''}>5xx Error</option>
+          </select>
         </div>
 
-        ${error ? `<p style="color: var(--color-danger)">${error}</p>` : ''}
+        ${error ? `<p style="color: var(--color-danger); margin-bottom: var(--spacing-md);">${error}</p>` : ''}
 
         <div class="table-container">
           <table class="table">
             <thead>
-              <tr>
-                <th>Timestamp</th>
-                <th>Method</th>
-                <th>Endpoint</th>
-                <th>User</th>
-                <th>Source IP</th>
-                <th>Status</th>
-              </tr>
+              <tr><th>Timestamp</th><th>Method</th><th>Endpoint</th><th>User</th><th>Source IP</th><th>Status</th></tr>
             </thead>
             <tbody>
-              ${entries.map(entry => `
+              ${pageData.map((e: AuditEntry) => `
                 <tr>
-                  <td>${formatTime(entry.timestamp)}</td>
-                  <td>
-                    <span class="badge ${this.getMethodBadgeClass(entry.method)}">${entry.method}</span>
-                  </td>
-                  <td>${entry.endpoint}</td>
-                  <td>${entry.user}</td>
-                  <td>${entry.source_ip}</td>
-                  <td>
-                    <span class="badge ${entry.status >= 200 && entry.status < 300 ? 'badge-success' : entry.status >= 400 ? 'badge-danger' : 'badge-warning'}">
-                      ${entry.status}
-                    </span>
-                  </td>
+                  <td style="white-space: nowrap;">${formatTime(e.timestamp)}</td>
+                  <td><span class="badge ${this.methodBadge(e.method)} badge-sm">${e.method}</span></td>
+                  <td class="mono">${e.endpoint}</td>
+                  <td>${e.user}</td>
+                  <td class="mono">${e.source_ip}</td>
+                  <td><span class="badge ${e.status < 300 ? 'badge-success' : e.status < 500 ? 'badge-warning' : 'badge-danger'} badge-sm">${e.status}</span></td>
                 </tr>
-              `).join('') || '<tr><td colspan="6">No audit entries found</td></tr>'}
+              `).join('') || '<tr><td colspan="6" style="color: var(--color-text-muted);">No entries</td></tr>'}
             </tbody>
           </table>
         </div>
+
+        <!-- Pagination -->
+        ${totalPages > 1 ? `
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: var(--spacing-md);">
+            <span style="font-size: var(--font-size-xs); color: var(--color-text-muted);">Per page: ${perPage}</span>
+            <div style="display: flex; gap: var(--spacing-xs);">
+              <button class="btn btn-secondary btn-sm" ${page <= 1 ? 'disabled' : ''} data-page="${page - 1}">← Prev</button>
+              <span style="padding: 4px 8px; font-size: var(--font-size-sm);">Page ${page} of ${totalPages}</span>
+              <button class="btn btn-secondary btn-sm" ${page >= totalPages ? 'disabled' : ''} data-page="${page + 1}">Next →</button>
+            </div>
+          </div>
+        ` : ''}
       </div>
     `;
 
-    const refreshBtn = this.$<HTMLButtonElement>('#refresh-btn');
-    refreshBtn?.addEventListener('click', () => this.loadData());
+    // Events
+    this.$<HTMLButtonElement>('#refresh-btn')?.addEventListener('click', () => this.loadData());
+    this.$<HTMLButtonElement>('#csv-btn')?.addEventListener('click', () => this.exportData('csv'));
+    this.$<HTMLButtonElement>('#json-btn')?.addEventListener('click', () => this.exportData('json'));
+
+    ['filter-method', 'filter-user', 'filter-status'].forEach(id => {
+      this.$<HTMLSelectElement>(`#${id}`)?.addEventListener('change', (e) => {
+        const key = id.replace('filter-', 'filter') as string;
+        const map: Record<string, string> = { 'filtermethod': 'filterMethod', 'filteruser': 'filterUser', 'filterstatus': 'filterStatus' };
+        this.setState({ [map[key] || key]: (e.target as HTMLSelectElement).value } as Partial<typeof this.state>);
+        this.applyFilters();
+      });
+    });
+
+    this.$$<HTMLButtonElement>('[data-page]').forEach(btn => {
+      btn.addEventListener('click', () => this.setState({ page: parseInt(btn.dataset.page!) }));
+    });
   }
 
-  private getMethodBadgeClass(method: string): string {
+  private methodBadge(method: string): string {
     switch (method) {
-      case 'GET':
-        return 'badge-info';
-      case 'POST':
-        return 'badge-success';
-      case 'PUT':
-      case 'PATCH':
-        return 'badge-warning';
-      case 'DELETE':
-        return 'badge-danger';
-      default:
-        return 'badge-info';
+      case 'GET': return 'badge-info';
+      case 'POST': return 'badge-success';
+      case 'PUT': case 'PATCH': return 'badge-warning';
+      case 'DELETE': return 'badge-danger';
+      default: return 'badge-outline';
     }
   }
 }

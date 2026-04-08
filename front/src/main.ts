@@ -16,40 +16,20 @@ import { SettingsPage } from '@pages/settings';
 import './styles/main.css';
 
 /**
- * Generate nav group label HTML
- */
-function navGroup(label: string): string {
-  return `<div class="nav-group-label">${label}</div>`;
-}
-
-/**
- * Initialize sidebar navigation
+ * Initialize sidebar navigation — flat list matching reference design
  */
 function initSidebar(): void {
   const navEl = $('#nav-items');
   if (!navEl) return;
 
   navEl.innerHTML = `
-    ${navGroup('Overview')}
-    ${navLink('/', '▣', 'Dashboard', 'dashboard')}
-
-    ${navGroup('Interfaces')}
-    ${navLink('/network', '◯', 'Interfaces', 'network')}
-
-    ${navGroup('Networking')}
-    ${navLink('/routing', '↗', 'Routing', 'routing')}
-    ${navLink('/nat', '↔', 'NAT', 'nat')}
-
-    ${navGroup('Firewall')}
-    ${navLink('/firewall', '▓', 'Firewall', 'firewall')}
-
-    ${navGroup('Tools')}
-    ${navLink('/tools', '⚒', 'Diagnostics', 'tools')}
-
-    ${navGroup('Logs')}
-    ${navLink('/audit', '◈', 'Audit Log', 'audit')}
-
-    ${navGroup('System')}
+    ${navLink('/', '⊞', 'Dashboard', 'dashboard')}
+    ${navLink('/network', '⇌', 'Network', 'network')}
+    ${navLink('/firewall', '◎', 'Firewall', 'firewall')}
+    ${navLink('/nat', '⇄', 'NAT', 'nat')}
+    ${navLink('/routing', '⇋', 'Routing', 'routing')}
+    ${navLink('/tools', '⚒', 'Tools', 'tools')}
+    ${navLink('/audit', '☰', 'Audit Log', 'audit')}
     ${navLink('/settings', '⚙', 'Settings', 'settings')}
   `;
 }

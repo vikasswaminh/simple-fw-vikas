@@ -1,10 +1,9 @@
 import { Component } from '@components/component';
 import { routingApi, routesApi } from '@api/endpoints';
+import { openModal, closeModal } from '@components/modal';
+import { showToast } from '@components/toast';
 import type { OspfConfig, OspfNetwork, BgpConfig, BgpNeighbor, StaticRoute, OspfNeighborStatus } from '@schemas';
 
-/**
- * Routing Page Component
- */
 export class RoutingPage extends Component<{
   ospf: OspfConfig | null;
   bgp: BgpConfig | null;
@@ -14,26 +13,19 @@ export class RoutingPage extends Component<{
   bgpSummary: string;
   loading: boolean;
   error: string | null;
-  activeTab: 'table' | 'ospf' | 'bgp' | 'static';
+  activeTab: 'ospf' | 'bgp' | 'static' | 'active';
 }> {
   constructor(element: HTMLElement | string) {
     super(element);
     this.state = {
-      ospf: null,
-      bgp: null,
-      staticRoutes: [],
-      routingTable: '',
-      ospfNeighbors: [],
-      bgpSummary: '',
-      loading: true,
-      error: null,
-      activeTab: 'table',
+      ospf: null, bgp: null, staticRoutes: [], routingTable: '',
+      ospfNeighbors: [], bgpSummary: '',
+      loading: true, error: null, activeTab: 'ospf',
     };
   }
 
   async init(): Promise<void> {
     await this.loadData();
-    await this.loadRoutingTable();
   }
 
   private async loadData(): Promise<void> {
@@ -43,19 +35,9 @@ export class RoutingPage extends Component<{
         routingApi.getBgpConfig(),
         routesApi.getRoutes(),
       ]);
-
-      this.setState({
-        ospf,
-        bgp,
-        staticRoutes: routes.routes || [],
-        loading: false,
-      });
+      this.setState({ ospf, bgp, staticRoutes: routes.routes || [], loading: false });
     } catch (error) {
-      console.error('Failed to load routing config:', error);
-      this.setState({
-        error: error instanceof Error ? error.message : 'Failed to load routing config',
-        loading: false,
-      });
+      this.setState({ error: error instanceof Error ? error.message : 'Failed to load', loading: false });
     }
   }
 
@@ -63,298 +45,212 @@ export class RoutingPage extends Component<{
     try {
       const data = await routingApi.getRoutingTable();
       this.setState({ routingTable: data.table || '' });
-    } catch (error) {
-      console.error('Failed to load routing table:', error);
-    }
+    } catch { /* ignore */ }
   }
 
   private async loadOspfNeighbors(): Promise<void> {
     try {
       const data = await routingApi.getOspfNeighbors();
       this.setState({ ospfNeighbors: data.neighbors || [] });
-    } catch (error) {
-      console.error('Failed to load OSPF neighbors:', error);
-      this.setState({ error: error instanceof Error ? error.message : 'Failed to load OSPF neighbors' });
-    }
+    } catch { /* ignore */ }
   }
 
   private async loadBgpSummary(): Promise<void> {
     try {
       const data = await routingApi.getBgpSummary();
       this.setState({ bgpSummary: data.summary || '' });
-    } catch (error) {
-      console.error('Failed to load BGP summary:', error);
-      this.setState({ error: error instanceof Error ? error.message : 'Failed to load BGP summary' });
-    }
+    } catch { /* ignore */ }
+  }
+
+  private openAddNetworkModal(): void {
+    openModal({
+      title: '+ Add Network',
+      body: `
+        <div class="form-group"><label class="form-label">Network Prefix</label><input type="text" class="form-input" id="net-prefix" placeholder="192.168.1.0/24"></div>
+        <div class="form-group"><label class="form-label">Area</label><input type="number" class="form-input" id="net-area" value="0" min="0"></div>
+      `,
+      footer: `<button class="btn btn-secondary" onclick="document.querySelector('.modal-close')?.click()">Cancel</button><button class="btn btn-primary" data-modal-submit>Add</button>`,
+      onSubmit: async () => {
+        const modal = document.querySelector('.modal');
+        if (!modal) return;
+        const prefix = (modal.querySelector('#net-prefix') as HTMLInputElement)?.value;
+        const area = parseInt((modal.querySelector('#net-area') as HTMLInputElement)?.value || '0');
+        if (!prefix) { showToast('Prefix required', 'error'); return; }
+        const ospf = { ...this.state.ospf! };
+        ospf.networks = [...(ospf.networks || []), { prefix, area }];
+        try {
+          await routingApi.saveOspfConfig(ospf);
+          showToast('Network added', 'success');
+          closeModal();
+          this.loadData();
+        } catch { showToast('Failed to add network', 'error'); }
+      },
+    });
   }
 
   render(): void {
-    const { ospf, bgp, staticRoutes, loading, error, activeTab } = this.state;
+    const { loading, error, activeTab } = this.state;
 
     if (loading) {
-      this.element.innerHTML = `
-        <div class="loading">
-          <div class="spinner"></div>
-          <span>Loading routing configuration...</span>
-        </div>
-      `;
+      this.element.innerHTML = `<div class="loading"><div class="spinner"></div> Loading...</div>`;
       return;
     }
 
     this.element.innerHTML = `
-      <div class="card">
-        <div class="card-header">
-          <h3 class="card-title">Routing</h3>
-          <button id="refresh-btn" class="btn btn-secondary">Refresh</button>
+      <div class="page-header">
+        <h1 class="page-title">Routing</h1>
+        <div class="page-actions">
+          <button id="refresh-btn" class="btn btn-secondary">↻ Refresh</button>
         </div>
+      </div>
 
-        <div style="display: flex; gap: var(--spacing-sm); margin-bottom: var(--spacing-md); border-bottom: 1px solid var(--color-border);">
-          <button class="tab-btn ${activeTab === 'table' ? 'active' : ''}" data-tab="table">Routing Table</button>
+      <div class="card">
+        <div class="tab-bar">
           <button class="tab-btn ${activeTab === 'ospf' ? 'active' : ''}" data-tab="ospf">OSPF</button>
           <button class="tab-btn ${activeTab === 'bgp' ? 'active' : ''}" data-tab="bgp">BGP</button>
           <button class="tab-btn ${activeTab === 'static' ? 'active' : ''}" data-tab="static">Static Routes</button>
+          <button class="tab-btn ${activeTab === 'active' ? 'active' : ''}" data-tab="active">Active Routes</button>
         </div>
 
         ${error ? `<p style="color: var(--color-danger); margin-bottom: var(--spacing-md);">${error}</p>` : ''}
 
-        ${activeTab === 'table' ? this.renderRoutingTable() : ''}
-        ${activeTab === 'ospf' ? this.renderOspf(ospf) : ''}
-        ${activeTab === 'bgp' ? this.renderBgp(bgp) : ''}
-        ${activeTab === 'static' ? this.renderStaticRoutes(staticRoutes) : ''}
+        ${activeTab === 'ospf' ? this.renderOspf() : ''}
+        ${activeTab === 'bgp' ? this.renderBgp() : ''}
+        ${activeTab === 'static' ? this.renderStatic() : ''}
+        ${activeTab === 'active' ? this.renderActive() : ''}
       </div>
     `;
 
-    // Bind events
     this.$$<HTMLButtonElement>('.tab-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const tab = btn.dataset.tab as typeof activeTab;
         this.setState({ activeTab: tab, error: null });
-        if (tab === 'table') this.loadRoutingTable();
+        if (tab === 'active') this.loadRoutingTable();
         if (tab === 'ospf') this.loadOspfNeighbors();
         if (tab === 'bgp') this.loadBgpSummary();
       });
     });
 
-    const refreshBtn = this.$<HTMLButtonElement>('#refresh-btn');
-    refreshBtn?.addEventListener('click', () => {
-      if (activeTab === 'table') this.loadRoutingTable();
-      else if (activeTab === 'ospf') { this.loadData(); this.loadOspfNeighbors(); }
-      else if (activeTab === 'bgp') { this.loadData(); this.loadBgpSummary(); }
-      else if (activeTab === 'static') this.loadData();
-    });
+    this.$<HTMLButtonElement>('#refresh-btn')?.addEventListener('click', () => this.loadData());
+    this.$<HTMLButtonElement>('#add-ospf-net')?.addEventListener('click', () => this.openAddNetworkModal());
   }
 
-  private renderRoutingTable(): string {
-    const { routingTable } = this.state;
-    return `
-      <div>
-        <p style="color: var(--color-text-secondary); margin-bottom: var(--spacing-md); font-size: var(--font-size-sm);">
-          Kernel routing table from FRR/vtysh. Click Refresh to update.
-        </p>
-        <pre style="
-          background: var(--color-bg-tertiary);
-          padding: var(--spacing-md);
-          border-radius: var(--radius-md);
-          overflow-x: auto;
-          font-family: monospace;
-          font-size: 0.85rem;
-          white-space: pre-wrap;
-          word-break: break-all;
-          min-height: 100px;
-        ">${routingTable || 'No routing table data. Click Refresh to load.'}</pre>
-      </div>
-    `;
-  }
-
-  private renderOspf(ospf: OspfConfig | null): string {
-    if (!ospf) return '<p>OSPF not configured</p>';
+  private renderOspf(): string {
+    const ospf = this.state.ospf;
+    if (!ospf) return '<p style="color: var(--color-text-muted);">OSPF not configured</p>';
     const { ospfNeighbors } = this.state;
-
     return `
-      <div>
-        <div style="display: flex; align-items: center; gap: var(--spacing-md); margin-bottom: var(--spacing-md);">
-          <label style="display: flex; align-items: center; gap: var(--spacing-sm);">
-            <input type="checkbox" ${ospf.enabled ? 'checked' : ''} id="ospf-enabled">
-            <span>Enable OSPF</span>
-          </label>
-          <button id="save-ospf" class="btn btn-primary">Save Changes</button>
+      <div style="display: flex; align-items: center; gap: var(--spacing-md); margin-bottom: var(--spacing-lg);">
+        <label class="toggle"><input type="checkbox" ${ospf.enabled ? 'checked' : ''} id="ospf-enabled"><span class="toggle-track"></span></label>
+        <strong>OSPF Enabled</strong>
+        <div class="form-group" style="margin: 0; margin-left: var(--spacing-lg);"><span class="form-label" style="display: inline;">Router ID</span>
+          <input type="text" class="form-input" value="${ospf.router_id || ''}" style="width: 160px; display: inline-block; margin-left: var(--spacing-sm);" placeholder="Auto">
         </div>
-
-        <div class="form-group">
-          <label class="form-label">Router ID</label>
-          <input type="text" class="form-input" value="${ospf.router_id || ''}" placeholder="Auto">
-        </div>
-
-        <h4 style="margin: var(--spacing-md) 0 var(--spacing-sm);">Networks</h4>
-        <div class="table-container">
-          <table class="table">
-            <thead>
+      </div>
+      <div class="table-container">
+        <table class="table">
+          <thead><tr><th>Network Prefix</th><th>Area</th><th>Area Type</th><th></th></tr></thead>
+          <tbody>
+            ${ospf.networks?.map((n: OspfNetwork, i: number) => `
               <tr>
-                <th>Network</th>
-                <th>Area</th>
-                <th>Actions</th>
+                <td class="mono">${n.prefix}</td>
+                <td>${n.area}</td>
+                <td><span class="badge badge-outline badge-sm">Normal</span></td>
+                <td><div class="actions">
+                  <button class="btn-icon" title="Edit">✎</button>
+                  <button class="btn-icon danger" title="Delete" data-del-ospf="${i}">🗑</button>
+                </div></td>
               </tr>
-            </thead>
-            <tbody>
-              ${ospf.networks?.map((net: OspfNetwork, idx: number) => `
-                <tr>
-                  <td>${net.prefix}</td>
-                  <td>${net.area}</td>
-                  <td>
-                    <button class="btn btn-danger btn-sm" data-delete-ospf-net="${idx}">Remove</button>
-                  </td>
-                </tr>
-              `).join('') || '<tr><td colspan="3">No networks configured</td></tr>'}
-            </tbody>
-          </table>
-        </div>
+            `).join('') || '<tr><td colspan="4" style="color: var(--color-text-muted);">No networks</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+      <button id="add-ospf-net" class="btn btn-secondary" style="margin-top: var(--spacing-md);">+ Add Network</button>
 
-        <button id="add-ospf-net" class="btn btn-secondary" style="margin-top: var(--spacing-md);">
-          Add Network
-        </button>
-
-        <!-- OSPF Neighbor Status -->
+      ${ospfNeighbors.length > 0 ? `
         <h4 style="margin: var(--spacing-lg) 0 var(--spacing-sm);">Neighbor Status</h4>
         <div class="table-container">
           <table class="table">
-            <thead>
-              <tr>
-                <th>Neighbor ID</th>
-                <th>IP Address</th>
-                <th>State</th>
-                <th>Uptime</th>
-              </tr>
-            </thead>
+            <thead><tr><th>Neighbor ID</th><th>IP Address</th><th>State</th><th>Uptime</th></tr></thead>
             <tbody>
-              ${ospfNeighbors.length > 0 ? ospfNeighbors.map(n => `
+              ${ospfNeighbors.map((n: OspfNeighborStatus) => `
                 <tr>
-                  <td>${n.neighbor_id}</td>
-                  <td>${n.ip_address}</td>
-                  <td>
-                    <span class="badge ${n.state === 'FULL' ? 'badge-success' : n.state === '2WAY' ? 'badge-info' : 'badge-warning'}">
-                      ${n.state}
-                    </span>
-                  </td>
+                  <td class="mono">${n.neighbor_id}</td><td class="mono">${n.ip_address}</td>
+                  <td><span class="badge ${n.state === 'FULL' ? 'badge-success' : 'badge-warning'} badge-sm">${n.state}</span></td>
                   <td>${n.uptime}</td>
                 </tr>
-              `).join('') : '<tr><td colspan="4">No OSPF neighbors. Click Refresh to load.</td></tr>'}
+              `).join('')}
             </tbody>
           </table>
         </div>
-      </div>
+      ` : ''}
     `;
   }
 
-  private renderBgp(bgp: BgpConfig | null): string {
-    if (!bgp) return '<p>BGP not configured</p>';
-    const { bgpSummary } = this.state;
-
+  private renderBgp(): string {
+    const bgp = this.state.bgp;
+    if (!bgp) return '<p style="color: var(--color-text-muted);">BGP not configured</p>';
     return `
-      <div>
-        <div style="display: flex; align-items: center; gap: var(--spacing-md); margin-bottom: var(--spacing-md);">
-          <label style="display: flex; align-items: center; gap: var(--spacing-sm);">
-            <input type="checkbox" ${bgp.enabled ? 'checked' : ''} id="bgp-enabled">
-            <span>Enable BGP</span>
-          </label>
-          <button id="save-bgp" class="btn btn-primary">Save Changes</button>
-        </div>
-
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--spacing-md);">
-          <div class="form-group">
-            <label class="form-label">Local AS</label>
-            <input type="number" class="form-input" value="${bgp.local_as || ''}">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Router ID</label>
-            <input type="text" class="form-input" value="${bgp.router_id || ''}">
-          </div>
-        </div>
-
-        <h4 style="margin: var(--spacing-md) 0 var(--spacing-sm);">Neighbors</h4>
-        <div class="table-container">
-          <table class="table">
-            <thead>
+      <div style="display: flex; align-items: center; gap: var(--spacing-md); margin-bottom: var(--spacing-lg);">
+        <label class="toggle"><input type="checkbox" ${bgp.enabled ? 'checked' : ''}><span class="toggle-track"></span></label>
+        <strong>BGP Enabled</strong>
+        <span style="margin-left: var(--spacing-lg); color: var(--color-text-secondary);">AS ${bgp.local_as} | Router ID ${bgp.router_id}</span>
+      </div>
+      <div class="table-container">
+        <table class="table">
+          <thead><tr><th>Address</th><th>Remote AS</th><th>Description</th><th></th></tr></thead>
+          <tbody>
+            ${bgp.neighbors?.map((n: BgpNeighbor) => `
               <tr>
-                <th>Address</th>
-                <th>Remote AS</th>
-                <th>Description</th>
-                <th>Actions</th>
+                <td class="mono">${n.address}</td><td>${n.remote_as}</td><td>${n.description || '—'}</td>
+                <td><div class="actions">
+                  <button class="btn-icon" title="Edit">✎</button>
+                  <button class="btn-icon danger" title="Delete">🗑</button>
+                </div></td>
               </tr>
-            </thead>
-            <tbody>
-              ${bgp.neighbors?.map((neighbor: BgpNeighbor, idx: number) => `
-                <tr>
-                  <td>${neighbor.address}</td>
-                  <td>${neighbor.remote_as}</td>
-                  <td>${neighbor.description || '—'}</td>
-                  <td>
-                    <button class="btn btn-danger btn-sm" data-delete-bgp-neighbor="${idx}">Remove</button>
-                  </td>
-                </tr>
-              `).join('') || '<tr><td colspan="4">No neighbors configured</td></tr>'}
-            </tbody>
-          </table>
-        </div>
+            `).join('') || '<tr><td colspan="4" style="color: var(--color-text-muted);">No neighbors</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+      <button class="btn btn-secondary" style="margin-top: var(--spacing-md);">+ Add Neighbor</button>
 
-        <button id="add-bgp-neighbor" class="btn btn-secondary" style="margin-top: var(--spacing-md);">
-          Add Neighbor
-        </button>
-
-        <!-- BGP Summary -->
+      ${this.state.bgpSummary ? `
         <h4 style="margin: var(--spacing-lg) 0 var(--spacing-sm);">Peer Summary</h4>
-        <pre style="
-          background: var(--color-bg-tertiary);
-          padding: var(--spacing-md);
-          border-radius: var(--radius-md);
-          overflow-x: auto;
-          font-family: monospace;
-          font-size: 0.85rem;
-          white-space: pre-wrap;
-          word-break: break-all;
-          min-height: 60px;
-        ">${bgpSummary || 'No BGP peer data. Click Refresh to load.'}</pre>
-      </div>
+        <div class="mono-output">${this.state.bgpSummary}</div>
+      ` : ''}
     `;
   }
 
-  private renderStaticRoutes(routes: StaticRoute[]): string {
+  private renderStatic(): string {
+    const routes = this.state.staticRoutes;
     return `
-      <div>
-        <div style="margin-bottom: var(--spacing-md);">
-          <button id="save-routes" class="btn btn-primary">Save Changes</button>
-        </div>
-
-        <div class="table-container">
-          <table class="table">
-            <thead>
+      <div class="table-container">
+        <table class="table">
+          <thead><tr><th>Destination</th><th>Gateway</th><th>Interface</th><th>Metric</th><th></th></tr></thead>
+          <tbody>
+            ${routes.map((r: StaticRoute) => `
               <tr>
-                <th>Destination</th>
-                <th>Gateway</th>
-                <th>Interface</th>
-                <th>Metric</th>
-                <th>Actions</th>
+                <td class="mono">${r.destination}</td><td class="mono">${r.gateway}</td>
+                <td>${r.interface || '—'}</td><td>${r.metric}</td>
+                <td><div class="actions">
+                  <button class="btn-icon" title="Edit">✎</button>
+                  <button class="btn-icon danger" title="Delete">🗑</button>
+                </div></td>
               </tr>
-            </thead>
-            <tbody>
-              ${routes.map((route, idx) => `
-                <tr>
-                  <td><input type="text" class="form-input" value="${route.destination}" data-route="${idx}" data-field="destination"></td>
-                  <td><input type="text" class="form-input" value="${route.gateway}" data-route="${idx}" data-field="gateway"></td>
-                  <td><input type="text" class="form-input" value="${route.interface || ''}" data-route="${idx}" data-field="interface"></td>
-                  <td><input type="number" class="form-input" value="${route.metric}" data-route="${idx}" data-field="metric" style="width: 80px;"></td>
-                  <td>
-                    <button class="btn btn-danger btn-sm" data-delete-route="${idx}">Remove</button>
-                  </td>
-                </tr>
-              `).join('') || '<tr><td colspan="5">No static routes configured</td></tr>'}
-            </tbody>
-          </table>
-        </div>
-
-        <button id="add-route" class="btn btn-secondary" style="margin-top: var(--spacing-md);">
-          Add Route
-        </button>
+            `).join('') || '<tr><td colspan="5" style="color: var(--color-text-muted);">No static routes</td></tr>'}
+          </tbody>
+        </table>
       </div>
+      <button class="btn btn-secondary" style="margin-top: var(--spacing-md);">+ Add Route</button>
+    `;
+  }
+
+  private renderActive(): string {
+    return `
+      <p style="color: var(--color-text-secondary); margin-bottom: var(--spacing-md); font-size: var(--font-size-sm);">
+        Kernel routing table from FRR/vtysh. Click Refresh to update.
+      </p>
+      <div class="mono-output">${this.state.routingTable || 'Click Refresh to load routing table.'}</div>
     `;
   }
 }

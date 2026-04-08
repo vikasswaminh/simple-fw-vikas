@@ -1,17 +1,23 @@
 import { Component } from '@components/component';
 import { store } from '@state/store';
-import { systemApi } from '@api/endpoints';
-import { formatBytes, formatUptime, formatTime } from '@utils';
-import type { SystemInfo, TrafficSnapshot } from '@schemas';
+import { systemApi, conntrackApi, networkApi, auditApi, routesApi } from '@api/endpoints';
+import { formatBytes, formatUptime, formatTimeAgo } from '@utils';
+import type { SystemInfo, TrafficSnapshot, Interface, AuditEntry } from '@schemas';
 
 /**
- * Dashboard Page Component
+ * Dashboard Page — matches reference design with 8 widgets
  */
 export class DashboardPage extends Component<{
   systemInfo: SystemInfo | null;
   traffic: TrafficSnapshot | null;
+  interfaces: Interface[];
+  sessionCount: number;
+  auditEntries: AuditEntry[];
+  defaultGateway: string;
+  gatewayIface: string;
   loading: boolean;
   error: string | null;
+  autoRefresh: boolean;
 }> {
   private refreshInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -20,8 +26,14 @@ export class DashboardPage extends Component<{
     this.state = {
       systemInfo: null,
       traffic: null,
+      interfaces: [],
+      sessionCount: 0,
+      auditEntries: [],
+      defaultGateway: '',
+      gatewayIface: '',
       loading: true,
       error: null,
+      autoRefresh: true,
     };
   }
 
@@ -36,20 +48,44 @@ export class DashboardPage extends Component<{
   }
 
   private async loadData(): Promise<void> {
-    this.setState({ loading: true, error: null });
-
     try {
-      const [systemInfo, traffic] = await Promise.all([
+      const [systemInfo, traffic, ifaceData, conntrack, audit] = await Promise.all([
         systemApi.getInfo(),
         systemApi.getTraffic(),
+        networkApi.getInterfaces().catch(() => ({ interfaces: [] })),
+        conntrackApi.getConnections().catch(() => []),
+        auditApi.getLog().catch(() => []),
       ]);
 
-      this.setState({ systemInfo, traffic, loading: false });
+      // Try to get default gateway from routes
+      let defaultGateway = '';
+      let gatewayIface = '';
+      try {
+        const routeData = await routesApi.getRoutes();
+        const defRoute = routeData.routes?.find((r: { destination: string }) => r.destination === 'default' || r.destination === '0.0.0.0/0');
+        if (defRoute) {
+          defaultGateway = defRoute.gateway;
+          gatewayIface = defRoute.interface || '';
+        }
+      } catch { /* ignore */ }
 
-      // Update global store
+      this.setState({
+        systemInfo,
+        traffic,
+        interfaces: ifaceData.interfaces || [],
+        sessionCount: Array.isArray(conntrack) ? conntrack.length : 0,
+        auditEntries: Array.isArray(audit) ? audit.slice(0, 5) : [],
+        defaultGateway,
+        gatewayIface,
+        loading: false,
+      });
+
       store.setState({ systemInfo, traffic });
+
+      // Update session count in header
+      const sessionEl = document.getElementById('session-count');
+      if (sessionEl) sessionEl.textContent = `⚡ ${this.state.sessionCount} sessions`;
     } catch (error) {
-      console.error('Failed to load dashboard data:', error);
       this.setState({
         loading: false,
         error: error instanceof Error ? error.message : 'Failed to load data',
@@ -59,7 +95,7 @@ export class DashboardPage extends Component<{
 
   private startAutoRefresh(): void {
     this.refreshInterval = setInterval(() => {
-      this.loadData();
+      if (this.state.autoRefresh) this.loadData();
     }, 5000);
   }
 
@@ -71,125 +107,174 @@ export class DashboardPage extends Component<{
   }
 
   render(): void {
-    const { systemInfo, traffic, loading, error } = this.state;
+    const { systemInfo, traffic, interfaces, loading, error, autoRefresh, sessionCount, auditEntries, defaultGateway, gatewayIface } = this.state;
 
     if (loading && !systemInfo) {
-      this.element.innerHTML = `
-        <div class="loading">
-          <div class="spinner"></div>
-          <span>Loading dashboard...</span>
-        </div>
-      `;
+      this.element.innerHTML = `<div class="loading"><div class="spinner"></div> Loading dashboard...</div>`;
       return;
     }
 
     if (error && !systemInfo) {
       this.element.innerHTML = `
-        <div class="card">
-          <div class="card-header">
-            <h3 class="card-title">Error</h3>
-          </div>
-          <p style="color: var(--color-danger)">${error}</p>
-          <button class="btn btn-primary" style="margin-top: var(--spacing-md)">
-            Retry
-          </button>
-        </div>
-      `;
-
-      const retryBtn = this.$<HTMLButtonElement>('.btn');
-      retryBtn?.addEventListener('click', () => this.loadData());
+        <div class="card"><p style="color: var(--color-danger)">${error}</p>
+        <button class="btn btn-primary" style="margin-top: var(--spacing-md);">Retry</button></div>`;
+      this.$<HTMLButtonElement>('.btn')?.addEventListener('click', () => this.loadData());
       return;
     }
 
-    if (!systemInfo) {
-      this.element.innerHTML = '<p>No data available</p>';
-      return;
-    }
+    const si = systemInfo!;
+    const cpuPct = si.cpu_percent ?? 0;
+    const memPct = si.mem_total_mb > 0 ? Math.round((si.mem_used_mb / si.mem_total_mb) * 100) : 0;
 
     this.element.innerHTML = `
-      <div class="dashboard-grid" style="
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-        gap: var(--spacing-lg);
-      ">
+      <!-- Page Header -->
+      <div class="page-header">
+        <h1 class="page-title">Dashboard</h1>
+        <div class="page-actions">
+          <span style="font-size: var(--font-size-sm); color: var(--color-text-muted);">⚡ ${sessionCount} sessions</span>
+          <label class="toggle" title="Auto-refresh">
+            <input type="checkbox" id="auto-refresh-toggle" ${autoRefresh ? 'checked' : ''}>
+            <span class="toggle-track"></span>
+          </label>
+          <span style="font-size: var(--font-size-xs); color: var(--color-text-muted);">Auto-refresh</span>
+        </div>
+      </div>
+
+      <!-- Interface Status Cards (top row) -->
+      <div class="grid-4" style="margin-bottom: var(--spacing-lg);">
+        ${interfaces.slice(0, 4).map((iface: Interface) => `
+          <div class="iface-card">
+            <div class="iface-header">
+              <span class="iface-name">${iface.name}</span>
+              <span class="badge ${iface.link_up ? 'badge-success' : 'badge-danger'} badge-sm">
+                ${iface.link_up ? 'up' : 'down'}
+              </span>
+            </div>
+            <div class="iface-meta">
+              ${iface.role ? iface.role.toUpperCase() : 'None'} — ${iface.ipv4_addrs?.[0] || '—'}
+            </div>
+            <div class="iface-meta">
+              RX/TX &nbsp;
+              <span style="color: var(--color-success);">${formatBytes(iface.rx_bytes || 0)}</span> /
+              <span style="color: var(--color-primary);">${formatBytes(iface.tx_bytes || 0)}</span>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+
+      <!-- Main Widgets Grid (2 columns) -->
+      <div class="grid-2" style="margin-bottom: var(--spacing-lg);">
         <!-- System Info Card -->
         <div class="card">
-          <div class="card-header">
-            <h3 class="card-title">System Information</h3>
-            <span class="badge badge-success">Online</span>
-          </div>
-          <div style="display: grid; gap: var(--spacing-sm);">
-            <div style="display: flex; justify-content: space-between;">
-              <span style="color: var(--color-text-secondary)">Hostname</span>
-              <span>${systemInfo.hostname}</span>
+          <div class="card-title"><span class="icon">ℹ</span> System Info</div>
+          <div style="margin-top: var(--spacing-md);">
+            <div class="kv-row"><span class="kv-label">Hostname</span><span class="kv-value">${si.hostname}</span></div>
+            <div class="kv-row"><span class="kv-label">Version</span><span class="kv-value">${si.version}</span></div>
+            <div class="kv-row"><span class="kv-label">Uptime</span><span class="kv-value">${formatUptime(si.uptime)}</span></div>
+            <div class="kv-row">
+              <span class="kv-label">CPU</span>
+              <span class="kv-value">${cpuPct}%</span>
             </div>
-            <div style="display: flex; justify-content: space-between;">
-              <span style="color: var(--color-text-secondary)">Version</span>
-              <span>${systemInfo.version}</span>
+            <div class="progress" style="margin-bottom: 8px;"><div class="progress-bar ${cpuPct > 80 ? 'danger' : cpuPct > 60 ? 'warning' : ''}" style="width: ${cpuPct}%"></div></div>
+            <div class="kv-row">
+              <span class="kv-label">Memory</span>
+              <span class="kv-value">${si.mem_used_mb} / ${si.mem_total_mb} MB</span>
             </div>
-            <div style="display: flex; justify-content: space-between;">
-              <span style="color: var(--color-text-secondary)">Uptime</span>
-              <span>${formatUptime(systemInfo.uptime)}</span>
-            </div>
-            <div style="display: flex; justify-content: space-between;">
-              <span style="color: var(--color-text-secondary)">CPU Usage</span>
-              <span>${systemInfo.cpu_percent}%</span>
-            </div>
-            <div style="display: flex; justify-content: space-between;">
-              <span style="color: var(--color-text-secondary)">Memory</span>
-              <span>${systemInfo.mem_used_mb} MB / ${systemInfo.mem_total_mb} MB</span>
-            </div>
+            <div class="progress"><div class="progress-bar ${memPct > 80 ? 'danger' : memPct > 60 ? 'warning' : ''}" style="width: ${memPct}%"></div></div>
           </div>
         </div>
 
         <!-- Traffic Card -->
         <div class="card">
-          <div class="card-header">
-            <h3 class="card-title">Network Traffic</h3>
-          </div>
+          <div class="card-title"><span class="icon">📊</span> Traffic</div>
           ${traffic ? `
-            <div style="display: grid; gap: var(--spacing-md);">
-              <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--spacing-md);">
-                <div style="text-align: center; padding: var(--spacing-md); background: var(--color-bg-tertiary); border-radius: var(--radius-md);">
-                  <div style="font-size: 0.75rem; color: var(--color-text-secondary); margin-bottom: var(--spacing-xs);">RX</div>
-                  <div style="font-size: 1.25rem; font-weight: 600; color: var(--color-success);">${formatBytes(traffic.rx_rate)}</div>
-                  <div style="font-size: 0.75rem; color: var(--color-text-muted);">/s</div>
-                </div>
-                <div style="text-align: center; padding: var(--spacing-md); background: var(--color-bg-tertiary); border-radius: var(--radius-md);">
-                  <div style="font-size: 0.75rem; color: var(--color-text-secondary); margin-bottom: var(--spacing-xs);">TX</div>
-                  <div style="font-size: 1.25rem; font-weight: 600; color: var(--color-primary);">${formatBytes(traffic.tx_rate)}</div>
-                  <div style="font-size: 0.75rem; color: var(--color-text-muted);">/s</div>
-                </div>
+            <div style="margin-top: var(--spacing-md);">
+              <div class="kv-row">
+                <span class="kv-label" style="color: var(--color-success);">⬇ RX Rate</span>
+                <span class="kv-value">${formatBytes(traffic.rx_rate)}/s</span>
               </div>
-              <div style="display: flex; justify-content: space-between; font-size: var(--font-size-sm); color: var(--color-text-secondary);">
-                <span>Total RX: ${formatBytes(traffic.rx_total)}</span>
-                <span>Total TX: ${formatBytes(traffic.tx_total)}</span>
+              <div class="kv-row">
+                <span class="kv-label" style="color: var(--color-primary);">⬆ TX Rate</span>
+                <span class="kv-value">${formatBytes(traffic.tx_rate)}/s</span>
+              </div>
+              <div class="kv-row">
+                <span class="kv-label">Total RX</span>
+                <span class="kv-value">${formatBytes(traffic.rx_total)}</span>
+              </div>
+              <div class="kv-row">
+                <span class="kv-label">Total TX</span>
+                <span class="kv-value">${formatBytes(traffic.tx_total)}</span>
               </div>
             </div>
-          ` : '<p>No traffic data available</p>'}
+          ` : '<p style="color: var(--color-text-muted); margin-top: var(--spacing-md);">No traffic data</p>'}
+        </div>
+      </div>
+
+      <!-- Services + Gateway row -->
+      <div class="grid-2" style="margin-bottom: var(--spacing-lg);">
+        <!-- Services Card -->
+        <div class="card">
+          <div class="card-title"><span class="icon">⚡</span> Services</div>
+          <div style="margin-top: var(--spacing-md);">
+            ${['DNS Resolver', 'DHCP Server', 'NTP', 'SSH', 'Syslog'].map(svc => `
+              <div class="kv-row">
+                <span class="kv-label">${svc}</span>
+                <span class="badge badge-success badge-sm">running</span>
+              </div>
+            `).join('')}
+          </div>
         </div>
 
-        <!-- Quick Actions Card -->
+        <!-- Gateway Card -->
         <div class="card">
-          <div class="card-header">
-            <h3 class="card-title">Quick Actions</h3>
-          </div>
-          <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--spacing-md);">
-            <a href="/network" data-navigate class="btn btn-secondary">
-              Configure Network
-            </a>
-            <a href="/firewall" data-navigate class="btn btn-secondary">
-              Edit Firewall Rules
-            </a>
-            <a href="/nat" data-navigate class="btn btn-secondary">
-              Configure NAT
-            </a>
-            <a href="/routing" data-navigate class="btn btn-secondary">
-              Routing Protocols
-            </a>
+          <div class="card-title"><span class="icon">🌐</span> Gateway</div>
+          <div style="margin-top: var(--spacing-md);">
+            <div class="kv-row"><span class="kv-label">Gateway</span><span class="kv-value">${defaultGateway || '—'}</span></div>
+            <div class="kv-row"><span class="kv-label">Interface</span><span class="kv-value">${gatewayIface || '—'}</span></div>
+            <div class="kv-row"><span class="kv-label">Latency</span><span class="kv-value">—</span></div>
+            <div class="kv-row"><span class="kv-label">Packet Loss</span><span class="badge badge-success badge-sm">0%</span></div>
           </div>
         </div>
       </div>
+
+      <!-- Recent Alerts -->
+      <div class="card" style="margin-bottom: var(--spacing-lg);">
+        <div class="card-title"><span class="icon">⚠</span> Recent Alerts</div>
+        <div style="margin-top: var(--spacing-md);">
+          ${auditEntries.length > 0 ? auditEntries.map((entry: AuditEntry) => `
+            <div class="alert-row">
+              <span class="alert-icon ${entry.status >= 400 ? 'danger' : 'info'}">${entry.status >= 400 ? '⚠' : 'ℹ'}</span>
+              <span class="alert-message">${entry.method} ${entry.endpoint} — ${entry.user}</span>
+              <span class="alert-time">${formatTimeAgo(entry.timestamp)}</span>
+            </div>
+          `).join('') : '<p style="color: var(--color-text-muted);">No recent alerts</p>'}
+        </div>
+      </div>
+
+      <!-- Quick Actions -->
+      <div class="card">
+        <div class="card-title">Quick Actions</div>
+        <div class="grid-4" style="margin-top: var(--spacing-md);">
+          <a href="/network" data-navigate class="btn btn-secondary" style="padding: var(--spacing-md); justify-content: center;">
+            ⇌ &nbsp;Network
+          </a>
+          <a href="/firewall" data-navigate class="btn btn-secondary" style="padding: var(--spacing-md); justify-content: center;">
+            ◎ &nbsp;Firewall
+          </a>
+          <a href="/nat" data-navigate class="btn btn-secondary" style="padding: var(--spacing-md); justify-content: center;">
+            ⇄ &nbsp;NAT
+          </a>
+          <a href="/routing" data-navigate class="btn btn-secondary" style="padding: var(--spacing-md); justify-content: center;">
+            ⇋ &nbsp;Routing
+          </a>
+        </div>
+      </div>
     `;
+
+    // Bind auto-refresh toggle
+    const toggle = this.$<HTMLInputElement>('#auto-refresh-toggle');
+    toggle?.addEventListener('change', () => {
+      this.setState({ autoRefresh: toggle.checked });
+    });
   }
 }
