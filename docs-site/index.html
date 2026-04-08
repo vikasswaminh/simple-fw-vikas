@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QuickFW Documentation — High-Performance L3/L4 Stateful Firewall</title>
+    <meta name="description" content="QuickFW is a lightweight, high-performance L3/L4 stateful firewall appliance written in Rust. Complete documentation for users, administrators, and developers.">
+    <link rel="stylesheet" href="css/main.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%231a1f36'/><path d='M16 4L6 9v8c0 5.5 4.3 10.7 10 12 5.7-1.3 10-6.5 10-12V9L16 4z' fill='%232563eb'/></svg>">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="nav-brand">
+            <svg class="brand-icon" viewBox="0 0 32 32" fill="none">
+                <rect width="32" height="32" rx="6" fill="#2563eb"/>
+                <path d="M16 5L7 10v7c0 5 3.8 9.7 9 11 5.2-1.3 9-6 9-11v-7L16 5z" fill="white"/>
+            </svg>
+            <span class="brand-name">QuickFW Docs</span>
+        </div>
+        <button class="nav-toggle" aria-label="Toggle navigation">
+            <span></span>
+            <span></span>
+            <span></span>
+        </button>
+        <ul class="nav-menu">
+            <li><a href="#overview">Overview</a></li>
+            <li><a href="guides/user-guide.html">User Guide</a></li>
+            <li><a href="guides/admin-guide.html">Admin Guide</a></li>
+            <li><a href="guides/developer-guide.html">Developer Guide</a></li>
+            <li><a href="api-reference/index.html">API Reference</a></li>
+            <li><a href="technical/index.html">Technical Docs</a></li>
+        </ul>
+        <div class="nav-actions">
+            <a href="https://github.com/quickfw/quickfw" class="btn btn-secondary btn-sm" target="_blank">GitHub</a>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <header class="hero">
+        <div class="hero-content">
+            <div class="hero-badge">v1.0.0</div>
+            <h1>QuickFW Documentation</h1>
+            <p class="hero-subtitle">High-performance L3/L4 stateful firewall appliance powered by Rust, nftables, and FRR routing</p>
+            <div class="hero-actions">
+                <a href="guides/user-guide.html" class="btn btn-primary">Get Started</a>
+                <a href="api-reference/index.html" class="btn btn-secondary">API Reference</a>
+            </div>
+            <div class="hero-stats">
+                <div class="stat">
+                    <span class="stat-value">Rust</span>
+                    <span class="stat-label">Language</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-value">50+</span>
+                    <span class="stat-label">API Endpoints</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-value">OSPF/BGP</span>
+                    <span class="stat-label">Routing</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-value">NFT</span>
+                    <span class="stat-label">Firewall Engine</span>
+                </div>
+            </div>
+        </div>
+        <div class="hero-visual">
+            <div class="code-preview">
+                <div class="code-header">
+                    <span class="code-dot red"></span>
+                    <span class="code-dot yellow"></span>
+                    <span class="code-dot green"></span>
+                    <span class="code-title">firewall.yaml</span>
+                </div>
+                <pre class="code-body"><code>rules:
+  - name: "Allow HTTP/HTTPS"
+    direction: forward
+    protocol: tcp
+    dst_port: "80,443"
+    action: accept
+    enabled: true
+  
+  - name: "Block SSH from WAN"
+    direction: input
+    in_interface: eth0
+    protocol: tcp
+    dst_port: "22"
+    action: drop
+    
+zones:
+  - interface: eth0
+    zone: wan
+    role: external
+  - interface: eth1
+    zone: lan
+    role: internal</code></pre>
+            </div>
+        </div>
+    </header>
+
+    <!-- Features Section -->
+    <section class="features" id="overview">
+        <div class="container">
+            <h2 class="section-title">Core Capabilities</h2>
+            <div class="feature-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                        </svg>
+                    </div>
+                    <h3>Stateful Firewall</h3>
+                    <p>L3/L4 packet filtering with connection tracking, stateful inspection, and nftables integration for high-performance packet processing.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="2" y="3" width="20" height="14" rx="2"/>
+                            <line x1="8" y1="21" x2="16" y2="21"/>
+                            <line x1="12" y1="17" x2="12" y2="21"/>
+                        </svg>
+                    </div>
+                    <h3>NAT & Port Forwarding</h3>
+                    <p>Masquerade (SNAT) for outbound traffic and port forwarding (DNAT) for inbound services with automatic nftables rule generation.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/>
+                            <path d="M2 12h20"/>
+                            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10"/>
+                        </svg>
+                    </div>
+                    <h3>Dynamic Routing</h3>
+                    <p>OSPF, BGP, and RIP support via FRR (Free Range Routing) for enterprise-grade network routing capabilities.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="3" y="11" width="18" height="11" rx="2"/>
+                            <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                        </svg>
+                    </div>
+                    <h3>API-First Security</h3>
+                    <p>REST API with session-based auth, Argon2 password hashing, rate limiting, and comprehensive audit logging.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                            <polyline points="14 2 14 8 20 8"/>
+                        </svg>
+                    </div>
+                    <h3>Live ISO Appliance</h3>
+                    <p>Debian-based bootable ISO with systemd services, automatic setup wizard, and web-based management interface.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 20h9"/>
+                            <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
+                        </svg>
+                    </div>
+                    <h3>Cisco-Style CLI</h3>
+                    <p>Familiar IOS-like command line interface for network administrators, with tab completion and contextual help.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Documentation Cards -->
+    <section class="docs-section">
+        <div class="container">
+            <h2 class="section-title">Documentation</h2>
+            <div class="docs-grid">
+                <a href="guides/user-guide.html" class="doc-card">
+                    <div class="doc-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                            <polyline points="14 2 14 8 20 8"/>
+                            <line x1="16" y1="13" x2="8" y2="13"/>
+                            <line x1="16" y1="17" x2="8" y2="17"/>
+                            <polyline points="10 9 9 9 8 9"/>
+                        </svg>
+                    </div>
+                    <h3>User Guide</h3>
+                    <p>Complete guide for end-users covering dashboard navigation, viewing firewall rules, monitoring traffic, and basic configuration tasks.</p>
+                    <span class="doc-link">Read Guide →</span>
+                </a>
+                <a href="guides/admin-guide.html" class="doc-card">
+                    <div class="doc-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                            <circle cx="9" cy="7" r="4"/>
+                            <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+                            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                        </svg>
+                    </div>
+                    <h3>Admin Guide</h3>
+                    <p>System administration guide covering installation, network configuration, routing protocols, security hardening, and troubleshooting.</p>
+                    <span class="doc-link">Read Guide →</span>
+                </a>
+                <a href="guides/developer-guide.html" class="doc-card">
+                    <div class="doc-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="16 18 22 12 16 6"/>
+                            <polyline points="8 6 2 12 8 18"/>
+                        </svg>
+                    </div>
+                    <h3>Developer Guide</h3>
+                    <p>API-first development guide for integrating with QuickFW, building custom clients, extending functionality, and contributing code.</p>
+                    <span class="doc-link">Read Guide →</span>
+                </a>
+                <a href="api-reference/index.html" class="doc-card">
+                    <div class="doc-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+                            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+                        </svg>
+                    </div>
+                    <h3>API Reference</h3>
+                    <p>Complete REST API documentation with endpoint descriptions, request/response schemas, authentication details, and code examples.</p>
+                    <span class="doc-link">View Reference →</span>
+                </a>
+                <a href="technical/index.html" class="doc-card">
+                    <div class="doc-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polygon points="12 2 2 7 12 12 22 7 12 2"/>
+                            <polyline points="2 17 12 22 22 17"/>
+                            <polyline points="2 12 12 17 22 12"/>
+                        </svg>
+                    </div>
+                    <h3>Technical Documentation</h3>
+                    <p>Deep technical analysis with line-by-line code review, architecture diagrams, security analysis, and implementation details.</p>
+                    <span class="doc-link">Explore →</span>
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Architecture Overview -->
+    <section class="architecture">
+        <div class="container">
+            <h2 class="section-title">System Architecture</h2>
+            <div class="arch-diagram">
+                <div class="arch-layer">
+                    <h4>Web Interface & CLI</h4>
+                    <div class="arch-items">
+                        <div class="arch-item">Vanilla JS SPA</div>
+                        <div class="arch-item">Cisco-Style CLI</div>
+                        <div class="arch-item">Setup Wizard</div>
+                    </div>
+                </div>
+                <div class="arch-arrow">↓</div>
+                <div class="arch-layer">
+                    <h4>REST API (Axum + TLS)</h4>
+                    <div class="arch-items">
+                        <div class="arch-item">Auth & Sessions</div>
+                        <div class="arch-item">Firewall API</div>
+                        <div class="arch-item">NAT API</div>
+                        <div class="arch-item">Routing API</div>
+                        <div class="arch-item">System API</div>
+                    </div>
+                </div>
+                <div class="arch-arrow">↓</div>
+                <div class="arch-layer">
+                    <h4>Core Libraries (Rust)</h4>
+                    <div class="arch-items">
+                        <div class="arch-item">gfw-io (NFQUEUE)</div>
+                        <div class="arch-item">gfw-ifmgr (Interfaces)</div>
+                        <div class="arch-item">routing (OSPF/BGP)</div>
+                        <div class="arch-item">config (YAML)</div>
+                    </div>
+                </div>
+                <div class="arch-arrow">↓</div>
+                <div class="arch-layer">
+                    <h4>System Integration</h4>
+                    <div class="arch-items">
+                        <div class="arch-item">nftables</div>
+                        <div class="arch-item">FRR (zebra/ospfd/bgpd)</div>
+                        <div class="arch-item">dnsmasq</div>
+                        <div class="arch-item">systemd</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Quick Start -->
+    <section class="quickstart">
+        <div class="container">
+            <h2 class="section-title">Quick Start</h2>
+            <div class="tabs">
+                <button class="tab-btn active" data-tab="iso">ISO Installation</button>
+                <button class="tab-btn" data-tab="docker">Docker Build</button>
+                <button class="tab-btn" data-tab="api">API Example</button>
+            </div>
+            <div class="tab-content active" id="tab-iso">
+                <pre class="code-block"><code># Download and boot the ISO
+wget https://releases.quickfw.io/quickfw-latest.iso
+
+# Write to USB drive (Linux/macOS)
+dd if=quickfw-latest.iso of=/dev/sdX bs=4M status=progress
+
+# Boot from USB and complete setup wizard
+# Default web UI: https://192.168.1.1 (admin/quickfw)</code></pre>
+            </div>
+            <div class="tab-content" id="tab-docker">
+                <pre class="code-block"><code># Clone repository
+git clone https://github.com/quickfw/quickfw.git
+cd quickfw
+
+# Build the ISO (requires Docker)
+bash build.sh
+
+# Output: output/quickfw.iso
+# Build time: 10-30 minutes depending on system</code></pre>
+            </div>
+            <div class="tab-content" id="tab-api">
+                <pre class="code-block"><code># Login and get session cookie
+curl -k -X POST https://192.168.1.1/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"quickfw"}' \
+  -c cookies.txt
+
+# Get system info
+curl -k https://192.168.1.1/api/system/info -b cookies.txt
+
+# Apply firewall rule
+curl -k -X POST https://192.168.1.1/api/firewall \
+  -b cookies.txt \
+  -H "Content-Type: application/json" \
+  -d @firewall-config.json</code></pre>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-grid">
+                <div class="footer-brand">
+                    <svg class="brand-icon" viewBox="0 0 32 32" fill="none">
+                        <rect width="32" height="32" rx="6" fill="#2563eb"/>
+                        <path d="M16 5L7 10v7c0 5 3.8 9.7 9 11 5.2-1.3 9-6 9-11v-7L16 5z" fill="white"/>
+                    </svg>
+                    <span>QuickFW</span>
+                </div>
+                <div class="footer-links">
+                    <h4>Documentation</h4>
+                    <ul>
+                        <li><a href="guides/user-guide.html">User Guide</a></li>
+                        <li><a href="guides/admin-guide.html">Admin Guide</a></li>
+                        <li><a href="guides/developer-guide.html">Developer Guide</a></li>
+                        <li><a href="api-reference/index.html">API Reference</a></li>
+                    </ul>
+                </div>
+                <div class="footer-links">
+                    <h4>Resources</h4>
+                    <ul>
+                        <li><a href="technical/index.html">Technical Docs</a></li>
+                        <li><a href="technical/security.html">Security</a></li>
+                        <li><a href="technical/architecture.html">Architecture</a></li>
+                    </ul>
+                </div>
+                <div class="footer-links">
+                    <h4>Community</h4>
+                    <ul>
+                        <li><a href="https://github.com/quickfw/quickfw" target="_blank">GitHub</a></li>
+                        <li><a href="https://github.com/quickfw/quickfw/issues" target="_blank">Issues</a></li>
+                        <li><a href="https://github.com/quickfw/quickfw/discussions" target="_blank">Discussions</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2026 QuickFW Project. Licensed under MIT License.</p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="js/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Technical Documentation — QuickFW</title>
+    <meta name="description" content="Deep technical documentation for QuickFW firewall appliance. Line-by-line code review, architecture analysis, security deep dive.">
+    <link rel="stylesheet" href="../css/main.css">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="nav-brand">
+            <svg class="brand-icon" viewBox="0 0 32 32" fill="none">
+                <rect width="32" height="32" rx="6" fill="#2563eb"/>
+                <path d="M16 5L7 10v7c0 5 3.8 9.7 9 11 5.2-1.3 9-6 9-11v-7L16 5z" fill="white"/>
+            </svg>
+            <span class="brand-name">QuickFW Docs</span>
+        </div>
+        <button class="nav-toggle" aria-label="Toggle navigation">
+            <span></span><span></span><span></span>
+        </button>
+        <ul class="nav-menu">
+            <li><a href="../index.html">Home</a></li>
+            <li><a href="user-guide.html">User Guide</a></li>
+            <li><a href="admin-guide.html">Admin Guide</a></li>
+            <li><a href="developer-guide.html">Developer Guide</a></li>
+            <li><a href="index.html" class="active">Technical</a></li>
+        </ul>
+    </nav>
+
+    <div class="docs-layout">
+        <!-- Sidebar -->
+        <aside class="docs-sidebar">
+            <div class="sidebar-search">
+                <input type="text" placeholder="Search technical docs...">
+            </div>
+            <nav class="sidebar-nav">
+                <div class="sidebar-section">
+                    <div class="sidebar-section-title">Architecture</div>
+                    <a href="#overview" class="sidebar-link">System Overview</a>
+                    <a href="#data-flow" class="sidebar-link">Data Flow</a>
+                    <a href="#module-structure" class="sidebar-link">Module Structure</a>
+                </div>
+                <div class="sidebar-section">
+                    <div class="sidebar-section-title">Core Modules</div>
+                    <a href="#io-crate" class="sidebar-link">io crate (NFQUEUE)</a>
+                    <a href="#ifmgr-crate" class="sidebar-link">ifmgr crate</a>
+                    <a href="#routing-crate" class="sidebar-link">routing crate</a>
+                    <a href="#api-crate" class="sidebar-link">quickfw-api</a>
+                </div>
+                <div class="sidebar-section">
+                    <div class="sidebar-section-title">Security Analysis</div>
+                    <a href="#auth-impl" class="sidebar-link">Authentication</a>
+                    <a href="#validation" class="sidebar-link">Input Validation</a>
+                    <a href="#nft-safety" class="sidebar-link">nftables Safety</a>
+                </div>
+                <div class="sidebar-section">
+                    <div class="sidebar-section-title">Code Review</div>
+                    <a href="#firewall-engine" class="sidebar-link">Firewall Engine</a>
+                    <a href="#nat-impl" class="sidebar-link">NAT Implementation</a>
+                    <a href="#api-handlers" class="sidebar-link">API Handlers</a>
+                </div>
+            </nav>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="docs-main">
+            <div class="breadcrumbs">
+                <a href="../index.html">Home</a>
+                <span class="separator">/</span>
+                <span>Technical Documentation</span>
+            </div>
+
+            <header class="docs-header">
+                <h1>Technical Documentation</h1>
+                <p>Deep technical analysis of QuickFW based on comprehensive line-by-line code review. Architecture, security analysis, and implementation details.</p>
+            </header>
+
+            <div class="docs-content">
+                <section id="overview">
+                    <h2>System Overview</h2>
+                    <p>QuickFW is a sophisticated L3/L4 stateful firewall appliance built with Rust, leveraging Linux kernel subsystems (NFQUEUE, nftables, conntrack) for high-performance packet processing.</p>
+
+                    <h3>Technology Stack</h3>
+                    <table>
+                        <thead>
+                            <tr><th>Layer</th><th>Technology</th><th>Version</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>Language</td><td>Rust</td><td>1.70+ (Edition 2021)</td></tr>
+                            <tr><td>Async Runtime</td><td>Tokio</td><td>1.41.1</td></tr>
+                            <tr><td>Web Framework</td><td>Axum</td><td>0.7+</td></tr>
+                            <tr><td>TLS</td><td>rustls</td><td>0.23+</td></tr>
+                            <tr><td>Serialization</td><td>serde</td><td>1.0</td></tr>
+                            <tr><td>NFQUEUE</td><td>nfq crate</td><td>0.3+</td></tr>
+                            <tr><td>Password Hashing</td><td>Argon2</td><td>Latest</td></tr>
+                        </tbody>
+                    </table>
+
+                    <h3>Project Structure</h3>
+                    <pre class="code-block"><code>workspace/
+├── io/                    # Packet I/O abstraction
+│   ├── src/lib.rs        # Core traits: Packet, PacketIO, Verdict
+│   ├── src/nfqueue.rs    # NFQUEUE implementation
+│   ├── src/firewall.rs   # Firewall rule engine
+│   ├── src/nat.rs        # NAT rule engine
+│   └── src/pcap.rs       # PCAP capture support
+├── ifmgr/                # Interface management
+│   └── src/lib.rs        # Interface detection, dnsmasq config
+├── routing/              # Routing protocols
+│   ├── src/lib.rs        # Static routes, FRR integration
+│   ├── src/ospf.rs       # OSPF configuration
+│   ├── src/bgp.rs        # BGP configuration
+│   └── src/rip.rs        # RIP configuration
+├── quickfw-api/          # REST API server
+│   ├── src/main.rs       # TLS setup, server bootstrap
+│   ├── src/lib.rs        # Module exports
+│   ├── src/auth.rs       # Authentication (739 lines)
+│   ├── src/validation.rs # Input validation (404 lines)
+│   ├── src/firewall_api.rs
+│   ├── src/nat_api.rs
+│   ├── src/routing_api.rs
+│   ├── src/system.rs     # System info, interfaces (1336 lines)
+│   ├── src/tools.rs      # Diagnostics (460 lines)
+│   ├── src/audit.rs      # Audit logging (128 lines)
+│   └── src/config_utils.rs
+├── quickfw-cli/          # Cisco-style CLI
+└── quickfw-setup/        # First-boot TUI wizard</code></pre>
+                </section>
+
+                <section id="data-flow">
+                    <h2>Data Flow Architecture</h2>
+                    
+                    <h3>Packet Flow Through the System</h3>
+                    <pre class="code-block"><code>┌─────────────────────────────────────────────────────────────────┐
+│                        Network Interface                         │
+│                          (eth0, eth1)                           │
+└─────────────────────────────┬───────────────────────────────────┘
+                              │
+┌─────────────────────────────▼───────────────────────────────────┐
+│                    Linux Netfilter Hooks                         │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐             │
+│  │   INPUT     │  │  FORWARD    │  │   OUTPUT    │             │
+│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘             │
+└─────────┼────────────────┼────────────────┼─────────────────────┘
+          │                │                │
+┌─────────▼────────────────▼────────────────▼─────────────────────┐
+│                    NFQUEUE (Queue #100)                          │
+│              ┌─────────────────────────┐                        │
+│              │  NFQueuePacketIO        │                        │
+│              │  - register()           │                        │
+│              │  - set_verdict()        │                        │
+│              │  - protected_conn()     │                        │
+│              └─────────────────────────┘                        │
+└─────────────────────────────┬───────────────────────────────────┘
+                              │
+┌─────────────────────────────▼───────────────────────────────────┐
+│                   Packet Processing Logic                        │
+│         (Determines ACCEPT/DROP/REJECT verdict)                  │
+└─────────────────────────────┬───────────────────────────────────┘
+                              │
+┌─────────────────────────────▼───────────────────────────────────┐
+│                   nftables Ruleset                               │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │  Table: inet gfw_rs                                     │    │
+│  │  ├─ Chain: MGMT_SAFETY (priority -200)                  │    │
+│  │  ├─ Chain: FORWARD (priority filter)                    │    │
+│  │  ├─ Chain: gfw_fw_forward (priority -10)                │    │
+│  │  ├─ Chain: POSTROUTING (NAT)                            │    │
+│  │  └─ Chain: PREROUTING (NAT)                             │    │
+│  └─────────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────────┘</code></pre>
+
+                    <h3>API Request Flow</h3>
+                    <pre class="code-block"><code>Client Request
+     │
+     ▼
+┌──────────────────────────────────────────────────────────┐
+│  HTTPS (Port 443)                                        │
+│  - TLS 1.3 with self-signed ECDSA cert                   │
+└─────────────────────────┬────────────────────────────────┘
+                          │
+┌─────────────────────────▼────────────────────────────────┐
+│  Security Headers Middleware                             │
+│  - Content-Security-Policy                               │
+│  - X-Frame-Options: DENY                                 │
+│  - X-Content-Type-Options: nosniff                       │
+│  - Strict-Transport-Security                             │
+└─────────────────────────┬────────────────────────────────┘
+                          │
+┌─────────────────────────▼────────────────────────────────┐
+│  Auth Middleware (basic_auth_middleware)                 │
+│  1. Rate limiting check                                  │
+│  2. Static asset bypass                                  │
+│  3. Session cookie validation                            │
+│  4. Basic auth fallback                                  │
+│  5. Default password check                               │
+└─────────────────────────┬────────────────────────────────┘
+                          │
+┌─────────────────────────▼────────────────────────────────┐
+│  Audit Middleware (audit_middleware)                     │
+│  - Logs POST/PUT/DELETE operations                       │
+│  - Records user, IP, endpoint, status                    │
+└─────────────────────────┬────────────────────────────────┘
+                          │
+┌─────────────────────────▼────────────────────────────────┐
+│  Router/Handler                                          │
+│  - Route matching                                        │
+│  - Handler execution                                     │
+│  - Response generation                                   │
+└──────────────────────────────────────────────────────────┘</code></pre>
+                </section>
+
+                <section id="io-crate">
+                    <h2>io crate: Packet I/O Abstraction</h2>
+                    
+                    <h3>Core Traits (src/lib.rs)</h3>
+                    <div class="file-reference">
+                        <div class="file-header">
+                            <span>io/src/lib.rs</span>
+                            <span class="file-lang">Rust</span>
+                        </div>
+                    </div>
+                    
+                    <p>The <code>io</code> crate provides the core abstraction for packet processing:</p>
+
+                    <h4>Verdict Enum (Lines 17-29)</h4>
+                    <pre class="code-block"><code>#[derive(Debug)]
+pub enum Verdict {
+    Accept,           // Accept packet, continue stream
+    AcceptModify,     // Accept with modified content
+    AcceptStream,     // Accept and stop stream processing
+    Drop,             // Drop packet, continue stream
+    DropStream,       // Drop packet and block stream
+}</code></pre>
+                    <p><strong>Analysis:</strong> The Verdict enum provides granular control over packet handling. <code>AcceptStream</code> and <code>DropStream</code> are particularly important for connection tracking efficiency - once a verdict is set for a stream, subsequent packets bypass inspection.</p>
+
+                    <h4>Packet Trait (Lines 32-45)</h4>
+                    <pre class="code-block"><code>pub trait Packet: DowncastSync + Send + Sync {
+    fn stream_id(&self) -> u32;           // Connection tracking ID
+    fn timestamp(&self) -> SystemTime;    // Packet arrival time
+    fn data(&self) -> &[u8];              // Raw packet bytes (IP header+)
+    fn as_any(&self) -> &dyn Any;
+}</code></pre>
+                    <p><strong>Analysis:</strong> The Packet trait abstracts raw packets for processing. Using <code>downcast_rs</code> allows runtime type checking while maintaining trait object safety. The <code>stream_id</code> correlates packets to connections via conntrack.</p>
+
+                    <h3>NFQUEUE Implementation (src/nfqueue.rs)</h3>
+                    
+                    <h4>Architecture (Lines 296-398)</h4>
+                    <p>The <code>NFQueuePacketIO</code> struct implements the PacketIO trait using Linux NFQUEUE:</p>
+
+                    <pre class="code-block"><code>pub struct NFQueuePacketIO {
+    queue: Arc<Mutex<Queue>>,        // nfq Queue handle
+    local: bool,                     // Local mode (INPUT/OUTPUT only)
+    rst: bool,                       // Send TCP RST on drop
+    rule_set: Arc<Mutex<bool>>,      // Rules applied flag
+}</code></pre>
+
+                    <p><strong>Key Implementation Details:</strong></p>
+                    <ul>
+                        <li><strong>Queue binding (Line 362):</strong> Binds to queue number 100, configurable via NFQUEUE_NUM constant</li>
+                        <li><strong>Copy range (Line 368):</strong> Sets 0xffff (65535) byte copy range to capture full packets</li>
+                        <li><strong>Conntrack integration (Line 380):</strong> Enables connection tracking info retrieval for stateful inspection</li>
+                        <li><strong>Non-blocking mode (Line 386):</strong> Essential for async tokio integration</li>
+                    </ul>
+
+                    <h4>Nftables Rule Generation (Lines 104-197)</h4>
+                    <p>The <code>generate_nft_rules()</code> function creates the base nftables configuration:</p>
+
+                    <pre class="code-block"><code>// MGMT_SAFETY chain (priority -200)
+// Bypasses all filtering for management traffic
+chains.push(NftChainSpec {
+    chain: "MGMT_SAFETY".to_string(),
+    header: "type filter hook input priority -200; policy accept;".to_string(),
+    rules: vec![
+        "tcp dport { 22, 443, 3000 } counter accept".to_string(),
+        "meta l4proto icmp counter accept".to_string(),
+    ],
+});</code></pre>
+
+                    <p><strong>Security Analysis:</strong> The MGMT_SAFETY chain at priority -200 ensures management access (SSH, HTTPS, HTTP redirect, ICMP) is never blocked by user rules. This prevents lockout scenarios.</p>
+
+                    <h4>Packet Processing Loop (Lines 532-583)</h4>
+                    <pre class="code-block"><code>tokio::spawn(async move {
+    loop {
+        let msg = {
+            let mut q = queue.lock().await;
+            q.recv()  // Non-blocking receive
+        };
+        
+        if let Ok(mut msg) = msg {
+            let payload = msg.get_payload();
+            let ct = msg.get_conntrack();
+            
+            // Sanity check (line 551)
+            let (ok, verdict) = NFQueuePacketIO::packet_attribute_sanity_check(...);
+            
+            // Service check - if disabled, accept all
+            if !*service_rx.borrow() {
+                msg.set_verdict(nfq::Verdict::Accept);
+                continue;
+            }
+            
+            // Create packet and call handler
+            let packet = NFQueuePacket { ... };
+            if !callback(Box::new(packet), None).await {
+                break;  // Callback returned false, stop processing
+            }
+        }
+    }
+});</code></pre>
+
+                    <p><strong>Critical Analysis:</strong> The packet processing loop uses tokio for async handling. The sanity check (line 493-508) drops packets smaller than 20 bytes (minimum IP header) and handles multicast without conntrack. The service_rx channel allows graceful shutdown.</p>
+                </section>
+
+                <section id="firewall-engine">
+                    <h2>Firewall Engine Deep Dive</h2>
+                    
+                    <h3>Firewall Rule Structure (src/firewall.rs, Lines 39-103)</h3>
+                    <pre class="code-block"><code>#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct FirewallConfig {
+    pub rules: Vec<FirewallRule>,
+    pub forward_policy: String,    // default: "accept"
+    pub input_policy: String,      // default: "accept"
+    pub output_policy: String,     // default: "accept"
+    pub zones: Vec<ZoneMapping>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FirewallRule {
+    pub name: String,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    pub direction: String,         // "forward", "input", "output"
+    pub in_interface: String,
+    pub out_interface: String,
+    pub src_zone: String,
+    pub dst_zone: String,
+    pub protocol: String,          // "tcp", "udp", "icmp", "tcp+udp"
+    pub src_ip: String,
+    pub src_port: String,
+    pub dst_ip: String,
+    pub dst_port: String,
+    pub action: String,            // "accept", "drop", "reject", "log"
+    pub log: bool,
+    pub schedule: Option<RuleSchedule>,  // Time-based rules
+    pub ipv6: bool,                // IPv6 support flag
+}</code></pre>
+
+                    <h3>String Sanitization (Lines 17-23)</h3>
+                    <pre class="code-block"><code>fn sanitize_nft_string(s: &str, max_len: usize) -> String {
+    s.chars()
+        .filter(|c| *c != '"' && *c != '\n' && *c != '\r' 
+                 && *c != '\\' && *c != ';' && *c != '{' && *c != '}')
+        .filter(|c| !c.is_control())
+        .take(max_len)
+        .collect()
+}</code></pre>
+                    <p><strong>Security Analysis:</strong> Critical function for preventing nftables injection attacks. Removes characters that could break nft script syntax or enable command injection. Length limiting prevents DoS via oversized strings.</p>
+
+                    <h3>Rule to nftables Translation (Lines 167-321)</h3>
+                    <p>The <code>generate_rule_nft()</code> function converts abstract rules to nft commands:</p>
+
+                    <pre class="code-block"><code>fn generate_rule_nft(rule: &FirewallRule, zones: &[ZoneMapping]) -> Vec<String> {
+    // Resolve zones to interfaces (lines 323-343)
+    let in_ifaces = resolve_zone_ifaces(&rule.in_interface, &rule.src_zone, zones);
+    let out_ifaces = resolve_zone_ifaces(&rule.out_interface, &rule.dst_zone, zones);
+    
+    // Generate cartesian product for multi-value fields
+    for proto in &proto_list {
+        for in_if in &in_list {
+            for out_if in &out_list {
+                // Build nft rule parts
+                let mut parts = Vec::new();
+                if let Some(iif) = in_if {
+                    parts.push(format!("iifname \"{}\"", iif));
+                }
+                // ... more parts
+                
+                // Final rule format: add rule inet gfw_rs CHAIN matches counter action
+                lines.push(format!(
+                    "add rule {} {} {} {} {}{}",
+                    NFT_FAMILY, NFT_TABLE, chain,
+                    parts.join(" "),
+                    comment_str
+                ));
+            }
+        }
+    }
+}</code></pre>
+
+                    <p><strong>Key Features:</strong></p>
+                    <ul>
+                        <li><strong>Zone resolution:</strong> Maps abstract zones to physical interfaces</li>
+                        <li><strong>Cartesian product:</strong> Handles multi-value fields (protocols, interfaces) by generating all combinations</li>
+                        <li><strong>Schedule support:</strong> Time-based rules using nft's meta day/hour (lines 268-299)</li>
+                    </ul>
+
+                    <h3>Complete nftables Script Generation (Lines 371-438)</h3>
+                    <pre class="code-block"><code>pub fn generate_firewall_nft_script(config: &FirewallConfig) -> String {
+    // Create firewall chains at priority -10 (before DPI queue at 0)
+    script.push_str(&format!(
+        "add chain {} {} {} {{ type filter hook input priority -10; policy {}; }}\n",
+        NFT_FAMILY, NFT_TABLE, FW_INPUT_CHAIN, config.input_policy
+    ));
+    
+    // MGMT_SAFETY bypass for marked packets (lines 398-405)
+    for chain in [FW_INPUT_CHAIN, FW_FORWARD_CHAIN, FW_OUTPUT_CHAIN] {
+        script.push_str(&format!(
+            "add rule {} {} {} meta mark 0x1 accept\n",
+            NFT_FAMILY, NFT_TABLE, chain
+        ));
+    }
+    
+    // Stateful inspection rules (lines 407-417)
+    for chain in [FW_INPUT_CHAIN, FW_FORWARD_CHAIN, FW_OUTPUT_CHAIN] {
+        script.push_str(&format!(
+            "add rule {} {} {} ct state established,related accept\n",
+            NFT_FAMILY, NFT_TABLE, chain
+        ));
+        script.push_str(&format!(
+            "add rule {} {} {} ct state invalid drop\n",
+            NFT_FAMILY, NFT_TABLE, chain
+        ));
+    }
+    
+    // User rules
+    for rule in &config.rules {
+        for line in generate_rule_nft(rule, &config.zones) {
+            script.push_str(&line);
+            script.push('\n');
+        }
+    }
+    
+    script
+}</code></pre>
+
+                    <p><strong>Security Architecture:</strong></p>
+                    <ol>
+                        <li>MGMT_SAFETY bypass (mark 0x1) ensures management access</li>
+                        <li>Stateful rules allow established/related, drop invalid</li>
+                        <li>Loopback and ICMP allowed on input</li>
+                        <li>User rules processed in order</li>
+                        <li>Default policy applied if no rules match</li>
+                    </ol>
+                </section>
+
+                <section id="auth-impl">
+                    <h2>Authentication Implementation</h2>
+                    
+                    <h3>Authentication Flow (src/auth.rs, Lines 97-265)</h3>
+                    
+                    <p>The <code>basic_auth_middleware</code> implements a comprehensive authentication system:</p>
+
+                    <h4>Rate Limiting (Lines 116-150)</h4>
+                    <pre class="code-block"><code>// Per-IP rate limiting with sliding window
+let mut limits = RATE_LIMITS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+
+// Cap store at 10000 entries (line 119)
+if limits.len() > 10000 {
+    let oldest = limits.iter().min_by_key(|(_, e)| e.api_window);
+    // Remove oldest entry
+}
+
+// Check lockout (line 136)
+if entry.lockout_until > now {
+    return Err(too_many_requests_response(entry.lockout_until - now));
+}
+
+// API rate limit: 60 req/min (line 146)
+if entry.api_count > API_RATE_LIMIT {
+    return Err(too_many_requests_response(60 - (now - entry.api_window)));
+}</code></pre>
+
+                    <p><strong>Security Features:</strong></p>
+                    <ul>
+                        <li><strong>Store capping:</strong> Prevents memory exhaustion from too many IPs</li>
+                        <li><strong>Lockout after 5 failures:</strong> 15-minute lockout prevents brute force</li>
+                        <li><strong>Sliding window:</strong> More accurate than fixed windows</li>
+                    </ul>
+
+                    <h4>Session Management (Lines 305-363)</h4>
+                    <pre class="code-block"><code>fn create_session(user: &str) -> String {
+    // Cryptographically secure random token
+    let token: String = OsRng
+        .sample_iter(&rand::distributions::Alphanumeric)
+        .take(64)  // 64 characters
+        .map(char::from)
+        .collect();
+    
+    // Sliding window expiry (30 minutes)
+    let now = unix_now();
+    sessions.insert(token.clone(), SessionInfo {
+        user: user.to_string(),
+        last_active: now,
+    });
+    
+    // Evict expired sessions
+    sessions.retain(|_, s| now - s.last_active < SESSION_MAX_AGE);
+    
+    // Cap at 100 sessions
+    if sessions.len() >= MAX_SESSIONS {
+        let oldest = sessions.iter().min_by_key(|(_, s)| s.last_active);
+        // Remove oldest
+    }
+    
+    token
+}</code></pre>
+
+                    <h4>Password Hashing (Lines 430-439)</h4>
+                    <pre class="code-block"><code>fn hash_and_store_password(password: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let salt = SaltString::generate(&mut OsRng);
+    let hash = Argon2::default()
+        .hash_password(password.as_bytes(), &salt)
+        .map_err(|e| format!("argon2 hash error: {}", e))?
+        .to_string();
+    std::fs::write(ADMIN_PASSWORD_PATH, &hash)?;
+    Ok(())
+}</code></pre>
+                    <p><strong>Analysis:</strong> Uses Argon2 (winner of Password Hashing Competition) with default parameters. Salt is randomly generated per password. Hash includes algorithm parameters for future compatibility.</p>
+                </section>
+
+                <section id="validation">
+                    <h2>Input Validation System</h2>
+                    
+                    <p>The <code>validation.rs</code> module (404 lines) provides comprehensive input sanitization:</p>
+
+                    <h3>Interface Name Validation (Lines 19-31)</h3>
+                    <pre class="code-block"><code>static IFACE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[a-zA-Z0-9._\-]{1,15}$").unwrap());
+
+pub fn validate_interface(s: &str) -> Result<(), String> {
+    let s = s.trim();
+    if s.is_empty() || s == "any" {
+        return Ok(());
+    }
+    if !IFACE_RE.is_match(s) {
+        return Err(format!(
+            "Invalid interface name '{}': must be 1-15 alphanumeric/._- characters",
+            s
+        ));
+    }
+    Ok(())
+}</code></pre>
+                    <p><strong>Security:</strong> The regex prevents injection by allowing only alphanumeric, dots, underscores, and hyphens. The 15-character limit matches Linux interface name limits.</p>
+
+                    <h3>CIDR Validation (Lines 44-70)</h3>
+                    <pre class="code-block"><code>pub fn validate_cidr(s: &str) -> Result<(), String> {
+    let s = s.trim();
+    if s.is_empty() || s == "any" || s == "*" || s == "0.0.0.0/0" {
+        return Ok(());
+    }
+
+    if let Some((ip_str, prefix_str)) = s.split_once('/') {
+        let ip: IpAddr = ip_str.parse()
+            .map_err(|_| format!("Invalid IP address in CIDR '{}'", s))?;
+        let prefix: u8 = prefix_str.parse()
+            .map_err(|_| format!("Invalid prefix length in CIDR '{}'", s))?;
+        let max_prefix = if ip.is_ipv4() { 32 } else { 128 };
+        if prefix > max_prefix {
+            return Err(format!(
+                "Prefix length {} exceeds maximum {} for '{}'",
+                prefix, max_prefix, s
+            ));
+        }
+    } else {
+        s.parse::<IpAddr>()
+            .map_err(|_| format!("Invalid IP address '{}'", s))?;
+    }
+    Ok(())
+}</code></pre>
+
+                    <h3>Injection Attack Prevention (Lines 369-403)</h3>
+                    <p>The test suite includes comprehensive injection payload tests:</p>
+                    <pre class="code-block"><code>#[test]
+fn test_injection_payloads() {
+    let payloads = vec![
+        "\" ; delete table inet gfw_rs ; echo \"",  // Command injection
+        "$(reboot)",                                // Command substitution
+        "`reboot`",                                 // Backtick substitution
+        "; flush ruleset ;",                        // Statement separator
+        "\\n add rule inet gfw_rs FORWARD accept", // Newline injection
+        "' OR '1'='1",                              // SQL injection pattern
+        "../../../etc/passwd",                      // Path traversal
+        "AAAA%n%n%n%n",                             // Format string
+        "{{7*7}}",                                  // Template injection
+        "<script>alert(1)</script>",               // XSS
+    ];
+    for payload in &payloads {
+        assert!(validate_interface(payload).is_err());
+        assert!(validate_cidr(payload).is_err());
+        assert!(validate_port(payload).is_err());
+    }
+}</code></pre>
+                </section>
+
+                <section id="api-handlers">
+                    <h2>API Handler Analysis</h2>
+                    
+                    <h3>Transaction-Based Config Import (system.rs, Lines 925-1066)</h3>
+                    <pre class="code-block"><code>async fn import_config(Json(config): Json<ConfigImport>) 
+    -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> 
+{
+    // Phase 1: Validate and serialize all sections to memory
+    if let Some(ref fw) = config.firewall {
+        let fw_config: gfw_io::firewall::FirewallConfig =
+            serde_json::from_value(fw.clone()).map_err(...)?;
+        if let Err(e) = crate::validation::validate_firewall_config(&fw_config) {
+            return Err((StatusCode::BAD_REQUEST, ...));
+        }
+        transaction.firewall = Some(serde_yaml::to_string(&fw_config)?);
+    }
+    // ... validate other sections
+
+    // Phase 2: Create backups and write all files atomically
+    if let Some(ref yaml) = transaction.firewall {
+        let _ = crate::config_utils::backup_config(FIREWALL_PATH);
+        crate::config_utils::atomic_write(FIREWALL_PATH, yaml)?;
+    }
+    // ... write other sections
+}</code></pre>
+                    <p><strong>Design Pattern:</strong> Two-phase commit ensures all-or-nothing configuration updates. Prevents partial configuration states that could leave the system in an inconsistent or insecure state.</p>
+
+                    <h3>Atomic File Writes (config_utils.rs)</h3>
+                    <pre class="code-block"><code>pub fn atomic_write(path: &str, content: &str) -> Result<(), std::io::Error> {
+    let temp_path = format!("{}.tmp", path);
+    
+    // Write to temp file
+    std::fs::write(&temp_path, content)?;
+    
+    // Sync to ensure data reaches disk
+    let file = std::fs::File::open(&temp_path)?;
+    file.sync_all()?;
+    drop(file);
+    
+    // Atomic rename
+    std::fs::rename(&temp_path, path)?;
+    
+    Ok(())
+}</code></pre>
+                    <p><strong>Reliability:</strong> Atomic writes prevent corruption from crashes during write operations. The fsync ensures data durability even on power loss.</p>
+                </section>
+
+                <section id="nat-impl">
+                    <h2>NAT Implementation</h2>
+                    
+                    <h3>Masquerade (SNAT) Rules (src/nat.rs, Lines 73-95)</h3>
+                    <pre class="code-block"><code>if !config.masquerade.is_empty() {
+    script.push_str(&format!(
+        "add chain {} {} POSTROUTING {{ type nat hook postrouting priority srcnat; policy accept; }}\n",
+        NFT_FAMILY, NFT_TABLE
+    ));
+    for rule in &config.masquerade {
+        if rule.source_cidr.is_empty() {
+            script.push_str(&format!(
+                "add rule {} {} POSTROUTING oifname \"{}\" masquerade\n",
+                NFT_FAMILY, NFT_TABLE, rule.out_interface
+            ));
+        } else {
+            script.push_str(&format!(
+                "add rule {} {} POSTROUTING oifname \"{}\" ip saddr {} masquerade\n",
+                NFT_FAMILY, NFT_TABLE, rule.out_interface, rule.source_cidr
+            ));
+        }
+    }
+}</code></pre>
+                    <p><strong>Analysis:</strong> Generates nftables rules in the POSTROUTING chain (priority srcnat) for source NAT. The masquerade target automatically uses the interface's current IP, ideal for dynamic WAN addresses.</p>
+
+                    <h3>Port Forwarding (DNAT) Rules (Lines 97-113)</h3>
+                    <pre class="code-block"><code>if !config.port_forward.is_empty() {
+    script.push_str(&format!(
+        "add chain {} {} PREROUTING {{ type nat hook prerouting priority dstnat; policy accept; }}\n",
+        NFT_FAMILY, NFT_TABLE
+    ));
+    for rule in &config.port_forward {
+        script.push_str(&format!(
+            "add rule {} {} PREROUTING iifname \"{}\" {} dport {} dnat ip to {}\n",
+            NFT_FAMILY, NFT_TABLE, 
+            rule.in_interface, 
+            rule.protocol, 
+            rule.dest_port, 
+            rule.forward_to
+        ));
+    }
+}</code></pre>
+                    <p><strong>Analysis:</strong> DNAT rules in PREROUTING chain (priority dstnat) redirect incoming connections before routing decisions. The <code>dnat to</code> target rewrites destination IP:port.</p>
+                </section>
+
+                <section id="security-summary">
+                    <h2>Security Summary</h2>
+                    
+                    <h3>Defense in Depth</h3>
+                    <table>
+                        <thead>
+                            <tr><th>Layer</th><th>Mechanism</th><th>Implementation</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>Transport</td><td>TLS 1.3</td><td>rustls with ECDSA certificates</td></tr>
+                            <tr><td>Session</td><td>Secure cookies</td><td>HttpOnly, Secure, SameSite=Strict</td></tr>
+                            <tr><td>Auth</td><td>Argon2 + sessions</td><td>64-char random tokens, 30-min expiry</td></tr>
+                            <tr><td>Rate Limit</td><td>Sliding window</td><td>60 req/min, 5-fail lockout</td></tr>
+                            <tr><td>Input</td><td>Validation</td><td>Regex-based with injection tests</td></tr>
+                            <tr><td>System</td><td>Privilege separation</td><td>Non-root service accounts</td></tr>
+                            <tr><td>Network</td><td>MGMT_SAFETY</td><td>High-priority nftables chain</td></tr>
+                            <tr><td>Audit</td><td>Logging</td><td>All mutations logged with user/IP</td></tr>
+                        </tbody>
+                    </table>
+
+                    <h3>Key Security Features</h3>
+                    <ul>
+                        <li><strong>Self-signed TLS:</strong> Generated on first boot with 10-year validity</li>
+                        <li><strong>Constant-time password compare:</strong> Uses subtle crate to prevent timing attacks</li>
+                        <li><strong>Atomic config writes:</strong> Prevents corruption during updates</li>
+                        <li><strong>Automatic backups:</strong> Before any configuration change</li>
+                        <li><strong>Re-auth for destructive ops:</strong> Password required for reboot/restore</li>
+                        <li><strong>CSP headers:</strong> Prevents XSS attacks</li>
+                        <li><strong>No CORS:</strong> API only accessible from same origin</li>
+                    </ul>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <script src="../js/main.js"></script>
+</body>
+</html>

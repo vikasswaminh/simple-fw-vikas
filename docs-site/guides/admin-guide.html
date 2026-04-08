@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Administrator Guide — QuickFW Documentation</title>
+    <meta name="description" content="Complete administrator guide for QuickFW firewall appliance. Covers installation, network configuration, routing protocols, security hardening, and troubleshooting.">
+    <link rel="stylesheet" href="../css/main.css">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="nav-brand">
+            <svg class="brand-icon" viewBox="0 0 32 32" fill="none">
+                <rect width="32" height="32" rx="6" fill="#2563eb"/>
+                <path d="M16 5L7 10v7c0 5 3.8 9.7 9 11 5.2-1.3 9-6 9-11v-7L16 5z" fill="white"/>
+            </svg>
+            <span class="brand-name">QuickFW Docs</span>
+        </div>
+        <button class="nav-toggle" aria-label="Toggle navigation">
+            <span></span><span></span><span></span>
+        </button>
+        <ul class="nav-menu">
+            <li><a href="../index.html">Home</a></li>
+            <li><a href="user-guide.html">User Guide</a></li>
+            <li><a href="admin-guide.html" class="active">Admin Guide</a></li>
+            <li><a href="developer-guide.html">Developer Guide</a></li>
+            <li><a href="../api-reference/index.html">API Reference</a></li>
+        </ul>
+    </nav>
+
+    <div class="docs-layout">
+        <!-- Sidebar -->
+        <aside class="docs-sidebar">
+            <div class="sidebar-search">
+                <input type="text" placeholder="Search guide...">
+            </div>
+            <nav class="sidebar-nav">
+                <div class="sidebar-section">
+                    <div class="sidebar-section-title">Installation</div>
+                    <a href="#overview" class="sidebar-link">Overview</a>
+                    <a href="#iso-install" class="sidebar-link">ISO Installation</a>
+                    <a href="#first-boot" class="sidebar-link">First Boot Setup</a>
+                </div>
+                <div class="sidebar-section">
+                    <div class="sidebar-section-title">Network Config</div>
+                    <a href="#interfaces" class="sidebar-link">Interface Setup</a>
+                    <a href="#wan-config" class="sidebar-link">WAN Configuration</a>
+                    <a href="#lan-config" class="sidebar-link">LAN Configuration</a>
+                    <a href="#dhcp-dns" class="sidebar-link">DHCP & DNS</a>
+                </div>
+                <div class="sidebar-section">
+                    <div class="sidebar-section-title">Firewall</div>
+                    <a href="#firewall-rules" class="sidebar-link">Creating Rules</a>
+                    <a href="#zones" class="sidebar-link">Security Zones</a>
+                    <a href="#nat" class="sidebar-link">NAT & Port Forwarding</a>
+                </div>
+                <div class="sidebar-section">
+                    <div class="sidebar-section-title">Routing</div>
+                    <a href="#static-routes" class="sidebar-link">Static Routes</a>
+                    <a href="#ospf" class="sidebar-link">OSPF</a>
+                    <a href="#bgp" class="sidebar-link">BGP</a>
+                </div>
+                <div class="sidebar-section">
+                    <div class="sidebar-section-title">Maintenance</div>
+                    <a href="#backup" class="sidebar-link">Backup & Restore</a>
+                    <a href="#updates" class="sidebar-link">Updates</a>
+                    <a href="#logging" class="sidebar-link">Logging & Syslog</a>
+                    <a href="#troubleshooting" class="sidebar-link">Troubleshooting</a>
+                </div>
+            </nav>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="docs-main">
+            <div class="breadcrumbs">
+                <a href="../index.html">Home</a>
+                <span class="separator">/</span>
+                <span>Admin Guide</span>
+            </div>
+
+            <header class="docs-header">
+                <h1>QuickFW Administrator Guide</h1>
+                <p>Complete guide for system administrators covering installation, configuration, routing protocols, and maintenance of the QuickFW firewall appliance.</p>
+            </header>
+
+            <div class="docs-content">
+                <section id="overview">
+                    <h2>Overview</h2>
+                    <p>QuickFW is a production-ready L3/L4 stateful firewall appliance built on Debian Linux with nftables, FRR routing suite, and a modern Rust-based API stack.</p>
+
+                    <h3>System Architecture</h3>
+                    <ul>
+                        <li><strong>Base OS</strong> — Debian 12 (Bookworm) Live System</li>
+                        <li><strong>Firewall Engine</strong> — nftables with NFQUEUE integration</li>
+                        <li><strong>Routing</strong> — FRR (Free Range Routing) with OSPF/BGP support</li>
+                        <li><strong>DHCP/DNS</strong> — dnsmasq</li>
+                        <li><strong>Web/API</strong> — Rust (Axum) with TLS</li>
+                        <li><strong>CLI</strong> — Cisco IOS-style interactive shell</li>
+                    </ul>
+
+                    <h3>Hardware Requirements</h3>
+                    <table>
+                        <thead>
+                            <tr><th>Component</th><th>Minimum</th><th>Recommended</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>CPU</td><td>2 cores x86_64</td><td>4+ cores</td></tr>
+                            <tr><td>RAM</td><td>2 GB</td><td>4+ GB</td></tr>
+                            <tr><td>Storage</td><td>8 GB</td><td>16+ GB SSD</td></tr>
+                            <tr><td>Network</td><td>2x Ethernet</td><td>4+ Ethernet ports</td></tr>
+                        </tbody>
+                    </table>
+                </section>
+
+                <section id="iso-install">
+                    <h2>ISO Installation</h2>
+                    
+                    <h3>Building the ISO</h3>
+                    <p>QuickFW uses Docker and Debian live-build for creating bootable ISO images:</p>
+                    
+                    <pre class="code-block"><code># Clone the repository
+git clone https://github.com/quickfw/quickfw.git
+cd quickfw
+
+# Build the ISO (requires Docker)
+bash build.sh
+
+# Output will be in output/quickfw.iso
+# Build time: 10-30 minutes depending on system</code></pre>
+
+                    <h3>Creating Bootable Media</h3>
+                    
+                    <h4>Linux/macOS</h4>
+                    <pre class="code-block"><code># Identify USB device (be careful!)
+lsblk
+
+# Write ISO to USB (replace sdX with your device)
+sudo dd if=output/quickfw.iso of=/dev/sdX bs=4M status=progress
+
+# Sync to ensure complete write
+sync</code></pre>
+
+                    <h4>Windows</h4>
+                    <p>Use Rufus (<a href="https://rufus.ie">https://rufus.ie</a>) or Etcher (<a href="https://www.balena.io/etcher">https://www.balena.io/etcher</a>) to write the ISO to USB.</p>
+
+                    <div class="callout callout-warning">
+                        <div class="callout-title">Data Destruction Warning</div>
+                        <p>The dd command will destroy all data on the target device. Double-check the device path before executing.</p>
+                    </div>
+                </section>
+
+                <section id="first-boot">
+                    <h2>First Boot Setup</h2>
+                    
+                    <h3>Initial Boot Process</h3>
+                    <ol>
+                        <li>Boot from the USB drive or ISO</li>
+                        <li>The system will load the Debian live environment</li>
+                        <li>QuickFW services will start automatically</li>
+                        <li>The setup wizard (TUI) will launch on the console</li>
+                    </ol>
+
+                    <h3>Setup Wizard Steps</h3>
+                    
+                    <h4>1. Network Interface Selection</h4>
+                    <p>Assign roles to detected interfaces:</p>
+                    <ul>
+                        <li><strong>WAN Interface</strong> — Connected to upstream internet</li>
+                        <li><strong>LAN Interface</strong> — Connected to internal network</li>
+                    </ul>
+
+                    <h4>2. WAN Configuration</h4>
+                    <p>Choose addressing mode:</p>
+                    <ul>
+                        <li><strong>DHCP</strong> — Automatic address assignment (default)</li>
+                        <li><strong>Static</strong> — Manual IP, gateway, and DNS configuration</li>
+                    </ul>
+
+                    <h4>3. LAN Configuration</h4>
+                    <p>Configure the internal network:</p>
+                    <ul>
+                        <li>LAN IP address (default: 192.168.1.1/24)</li>
+                        <li>DHCP range for automatic client assignment</li>
+                    </ul>
+
+                    <h4>4. Admin Password</h4>
+                    <p>Set the administrator password for web and CLI access.</p>
+
+                    <h4>5. Configuration Save</h4>
+                    <p>The wizard will:</p>
+                    <ul>
+                        <li>Apply network configuration</li>
+                        <li>Generate TLS certificates</li>
+                        <li>Start all services</li>
+                        <li>Save configuration to persistent storage</li>
+                    </ul>
+
+                    <h3>Post-Setup Access</h3>
+                    <p>After setup completes:</p>
+                    <ul>
+                        <li><strong>Web UI</strong>: <code>https://&lt;lan-ip&gt;</code> (e.g., https://192.168.1.1)</li>
+                        <li><strong>Console CLI</strong>: Available on tty1</li>
+                        <li><strong>Emergency Console</strong>: Available on tty2</li>
+                    </ul>
+                </section>
+
+                <section id="interfaces">
+                    <h2>Interface Setup</h2>
+                    
+                    <h3>Interface Naming</h3>
+                    <p>QuickFW uses standard Linux interface naming:</p>
+                    <ul>
+                        <li><code>eth0, eth1, ...</code> — Traditional Ethernet names</li>
+                        <li><code>ens33, ens34, ...</code> — Predictable interface names (systemd)</li>
+                        <li><code>enp3s0, enp4s0, ...</code> — PCI-based names</li>
+                    </ul>
+
+                    <h3>Interface Configuration Files</h3>
+                    <p>Network configuration is stored in:</p>
+                    <ul>
+                        <li><code>/etc/quickfw/appliance.yaml</code> — Main appliance config</li>
+                        <li><code>/etc/quickfw/interfaces.yaml</code> — Interface roles</li>
+                    </ul>
+
+                    <h3>Role Assignment</h3>
+                    <p>Interfaces can be assigned roles:</p>
+                    <table>
+                        <thead>
+                            <tr><th>Role</th><th>Purpose</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>wan</td><td>External/internet-facing interface</td></tr>
+                            <tr><td>lan</td><td>Internal network interface</td></tr>
+                            <tr><td>dmz</td><td>Demilitarized zone for public services</td></tr>
+                            <tr><td>mgmt</td><td>Out-of-band management interface</td></tr>
+                        </tbody>
+                    </table>
+                </section>
+
+                <section id="wan-config">
+                    <h2>WAN Configuration</h2>
+                    
+                    <h3>DHCP Mode</h3>
+                    <p>In DHCP mode, the WAN interface automatically obtains:</p>
+                    <ul>
+                        <li>IP address and subnet mask</li>
+                        <li>Default gateway</li>
+                        <li>DNS servers</li>
+                    </ul>
+
+                    <h3>Static Mode</h3>
+                    <p>Static configuration requires:</p>
+                    <table>
+                        <thead>
+                            <tr><th>Parameter</th><th>Example</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>IP Address/CIDR</td><td>203.0.113.10/24</td></tr>
+                            <tr><td>Gateway</td><td>203.0.113.1</td></tr>
+                            <tr><td>DNS Servers</td><td>8.8.8.8, 1.1.1.1</td></tr>
+                        </tbody>
+                    </table>
+
+                    <h3>Configuration via API</h3>
+                    <pre class="code-block"><code>PUT /api/interfaces/eth0/config
+{
+  "mode": "static",
+  "address": "203.0.113.10/24",
+  "gateway": "203.0.113.1",
+  "dns": ["8.8.8.8", "1.1.1.1"]
+}</code></pre>
+                </section>
+
+                <section id="lan-config">
+                    <h2>LAN Configuration</h2>
+                    
+                    <h3>Static IP Assignment</h3>
+                    <p>The LAN interface always uses a static IP address:</p>
+                    <ul>
+                        <li>Serves as the default gateway for LAN clients</li>
+                        <li>Hosts the web management interface</li>
+                        <li>Provides DHCP and DNS services</li>
+                    </ul>
+
+                    <h3>Recommended LAN Schemes</h3>
+                    <table>
+                        <thead>
+                            <tr><th>Network Size</th><th>Subnet</th><th>DHCP Range</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>Small (home)</td><td>192.168.1.0/24</td><td>.100 - .200</td></tr>
+                            <tr><td>Medium (office)</td><td>192.168.0.0/22</td><td>.100 - .254</td></tr>
+                            <tr><td>Large (enterprise)</td><td>10.0.0.0/16</td><td>.1 - .254</td></tr>
+                        </tbody>
+                    </table>
+                </section>
+
+                <section id="dhcp-dns">
+                    <h2>DHCP & DNS Configuration</h2>
+                    
+                    <h3>DHCP Server (dnsmasq)</h3>
+                    <p>QuickFW uses dnsmasq for DHCP services. Configuration includes:</p>
+                    
+                    <h4>DHCP Options</h4>
+                    <table>
+                        <thead>
+                            <tr><th>Option</th><th>Description</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>Range</td><td>Start and end IP for lease pool</td></tr>
+                            <tr><td>Lease Time</td><td>Duration of IP assignment (default: 12h)</td></tr>
+                            <tr><td>Gateway</td><td>Default gateway (QuickFW LAN IP)</td></tr>
+                            <tr><td>DNS</td><td>DNS server (QuickFW LAN IP)</td></tr>
+                        </tbody>
+                    </table>
+
+                    <h3>DNS Configuration</h3>
+                    
+                    <h4>Forwarding DNS</h4>
+                    <p>QuickFW acts as a DNS forwarder:</p>
+                    <ol>
+                        <li>Client queries QuickFW DNS</li>
+                        <li>QuickFW checks local overrides</li>
+                        <li>If no match, forwards to upstream DNS</li>
+                        <li>Caches response for future queries</li>
+                    </ol>
+
+                    <h4>Local DNS Overrides</h4>
+                    <p>Create custom DNS entries for internal resources:</p>
+                    <pre class="code-block"><code>POST /api/tools/dns-local
+[
+  {"hostname": "server.local", "ip": "192.168.1.10"},
+  {"hostname": "printer.local", "ip": "192.168.1.20"}
+]</code></pre>
+
+                    <h4>Viewing DHCP Leases</h4>
+                    <pre class="code-block"><code>GET /api/tools/dhcp-leases</code></pre>
+                </section>
+
+                <section id="firewall-rules">
+                    <h2>Creating Firewall Rules</h2>
+                    
+                    <h3>Rule Components</h3>
+                    <table>
+                        <thead>
+                            <tr><th>Field</th><th>Description</th><th>Examples</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>Name</td><td>Human-readable identifier</td><td>"Allow HTTP", "Block SSH"</td></tr>
+                            <tr><td>Direction</td><td>Traffic flow direction</td><td>input, forward, output</td></tr>
+                            <tr><td>Protocol</td><td>Layer 4 protocol</td><td>tcp, udp, icmp, tcp+udp</td></tr>
+                            <tr><td>Source IP</td><td>Source address/CIDR</td><td>192.168.1.0/24, any</td></tr>
+                            <tr><td>Source Port</td><td>Source port(s)</td><td>80, 443, 1024-65535</td></tr>
+                            <tr><td>Dest IP</td><td>Destination address/CIDR</td><td>10.0.0.0/8, any</td></tr>
+                            <tr><td>Dest Port</td><td>Destination port(s)</td><td>22, 80, 443</td></tr>
+                            <tr><td>Action</td><td>Rule action</td><td>accept, drop, reject, log</td></tr>
+                        </tbody>
+                    </table>
+
+                    <h3>Rule Direction Reference</h3>
+                    
+                    <h4>Input Chain</h4>
+                    <p>Traffic destined for the firewall itself:</p>
+                    <ul>
+                        <li>Management access (HTTPS, SSH)</li>
+                        <li>DNS queries to the firewall</li>
+                        <li>DHCP requests</li>
+                        <li>Ping to firewall interfaces</li>
+                    </ul>
+
+                    <h4>Forward Chain</h4>
+                    <p>Traffic passing through the firewall:</p>
+                    <ul>
+                        <li>LAN to WAN (internet access)</li>
+                        <li>WAN to LAN (port forwarded traffic)</li>
+                        <li>LAN to LAN (inter-VLAN routing)</li>
+                    </ul>
+
+                    <h4>Output Chain</h4>
+                    <p>Traffic originating from the firewall:</p>
+                    <ul>
+                        <li>DNS queries to upstream servers</li>
+                        <li>NTP synchronization</li>
+                        <li>Software updates</li>
+                    </ul>
+
+                    <h3>Example Rules</h3>
+                    
+                    <h4>Allow LAN to WAN (Internet)</h4>
+                    <pre class="code-block"><code>{
+  "name": "Allow Internet Access",
+  "direction": "forward",
+  "in_interface": "eth1",
+  "out_interface": "eth0",
+  "protocol": "any",
+  "action": "accept",
+  "enabled": true
+}</code></pre>
+
+                    <h4>Allow HTTP/HTTPS to Web Server</h4>
+                    <pre class="code-block"><code>{
+  "name": "Allow Web Traffic",
+  "direction": "forward",
+  "protocol": "tcp",
+  "dst_ip": "192.168.1.10",
+  "dst_port": "80,443",
+  "action": "accept",
+  "enabled": true
+}</code></pre>
+
+                    <h4>Block SSH from WAN</h4>
+                    <pre class="code-block"><code>{
+  "name": "Block External SSH",
+  "direction": "input",
+  "in_interface": "eth0",
+  "protocol": "tcp",
+  "dst_port": "22",
+  "action": "drop",
+  "enabled": true
+}</code></pre>
+
+                    <h3>Rule Ordering Best Practices</h3>
+                    <ol>
+                        <li>Management access rules (SSH, HTTPS)</li>
+                        <li>Specific allow rules (particular hosts/services)</li>
+                        <li>General allow rules (LAN to WAN)</li>
+                        <li>Specific block rules (blocked hosts)</li>
+                        <li>General block rules (default deny)</li>
+                    </ol>
+                </section>
+
+                <section id="zones">
+                    <h2>Security Zones</h2>
+                    
+                    <h3>Zone-Based Firewall</h3>
+                    <p>Zones simplify rule management by grouping interfaces:</p>
+                    <ul>
+                        <li><strong>WAN Zone</strong> — Untrusted external networks</li>
+                        <li><strong>LAN Zone</strong> — Trusted internal networks</li>
+                        <li><strong>DMZ Zone</strong> — Semi-trusted public services</li>
+                    </ul>
+
+                    <h3>Zone Configuration</h3>
+                    <pre class="code-block"><code>{
+  "zones": [
+    {"interface": "eth0", "zone": "wan", "role": "external"},
+    {"interface": "eth1", "zone": "lan", "role": "internal"},
+    {"interface": "eth2", "zone": "dmz", "role": "public"}
+  ]
+}</code></pre>
+
+                    <h3>Zone-Based Rules</h3>
+                    <p>Use zones instead of interfaces in rules:</p>
+                    <pre class="code-block"><code>{
+  "name": "Allow LAN to DMZ HTTP",
+  "direction": "forward",
+  "src_zone": "lan",
+  "dst_zone": "dmz",
+  "protocol": "tcp",
+  "dst_port": "80,443",
+  "action": "accept"
+}</code></pre>
+                </section>
+
+                <section id="nat">
+                    <h2>NAT & Port Forwarding</h2>
+                    
+                    <h3>Masquerade (Source NAT)</h3>
+                    <p>Masquerade hides internal IPs behind the WAN interface IP:</p>
+                    
+                    <pre class="code-block"><code>POST /api/nat
+{
+  "masquerade": [
+    {
+      "out_interface": "eth0",
+      "source_cidr": "192.168.1.0/24"
+    }
+  ]
+}</code></pre>
+
+                    <h3>Port Forwarding (Destination NAT)</h3>
+                    <p>Forward external ports to internal hosts:</p>
+                    
+                    <pre class="code-block"><code>{
+  "port_forward": [
+    {
+      "protocol": "tcp",
+      "dest_port": 443,
+      "forward_to": "192.168.1.10:443",
+      "in_interface": "eth0"
+    },
+    {
+      "protocol": "tcp",
+      "dest_port": 2222,
+      "forward_to": "192.168.1.20:22",
+      "in_interface": "eth0"
+    }
+  ]
+}</code></pre>
+
+                    <h3>NAT Best Practices</h3>
+                    <ul>
+                        <li>Use non-standard external ports for admin services</li>
+                        <li>Limit port forwards to specific protocols</li>
+                        <li>Document all port forwards for security audits</li>
+                        <li>Combine with firewall rules for defense in depth</li>
+                    </ul>
+                </section>
+
+                <section id="static-routes">
+                    <h2>Static Routes</h2>
+                    
+                    <h3>When to Use Static Routes</h3>
+                    <ul>
+                        <li>Small networks without dynamic routing</li>
+                        <li>Specific paths to remote networks</li>
+                        <li>Default route to upstream gateway</li>
+                        <li>Backup routes with higher metrics</li>
+                    </ul>
+
+                    <h3>Route Configuration</h3>
+                    <pre class="code-block"><code>POST /api/routes
+{
+  "routes": [
+    {
+      "destination": "10.0.0.0/8",
+      "gateway": "192.168.1.254",
+      "metric": 100
+    },
+    {
+      "destination": "172.16.0.0/12",
+      "gateway": "192.168.1.253",
+      "interface": "eth1",
+      "metric": 200
+    }
+  ]
+}</code></pre>
+
+                    <h3>Route Priority</h3>
+                    <p>Routes are selected based on:</p>
+                    <ol>
+                        <li>Most specific match (longest prefix)</li>
+                        <li>Lowest metric value</li>
+                        <li>Administrative distance (static vs dynamic)</li>
+                    </ol>
+                </section>
+
+                <section id="ospf">
+                    <h2>OSPF Configuration</h2>
+                    
+                    <h3>OSPF Overview</h3>
+                    <p>Open Shortest Path First (OSPF) is a link-state routing protocol:</p>
+                    <ul>
+                        <li>Fast convergence</li>
+                        <li>Scalable to large networks</li>
+                        <li>Supports authentication</li>
+                        <li>Uses areas for hierarchical design</li>
+                    </ul>
+
+                    <h3>Basic OSPF Setup</h3>
+                    <pre class="code-block"><code>POST /api/routing/ospf
+{
+  "enabled": true,
+  "router_id": "1.1.1.1",
+  "networks": [
+    {"prefix": "192.168.1.0/24", "area": 0},
+    {"prefix": "10.0.0.0/24", "area": 0}
+  ],
+  "passive_interfaces": ["eth1"],
+  "hello_interval": 10,
+  "dead_interval": 40
+}</code></pre>
+
+                    <h3>Monitoring OSPF</h3>
+                    <pre class="code-block"><code>GET /api/routing/ospf/neighbors
+GET /api/routing/table?protocol=ospf</code></pre>
+                </section>
+
+                <section id="bgp">
+                    <h2>BGP Configuration</h2>
+                    
+                    <h3>BGP Overview</h3>
+                    <p>Border Gateway Protocol (BGP) is the routing protocol of the internet:</p>
+                    <ul>
+                        <li>Path-vector protocol</li>
+                        <li>Supports policy-based routing</li>
+                        <li>Used for multi-homing</li>
+                        <li>AS path tracking</li>
+                    </ul>
+
+                    <h3>Basic BGP Setup</h3>
+                    <pre class="code-block"><code>POST /api/routing/bgp
+{
+  "enabled": true,
+  "local_as": 65001,
+  "router_id": "1.1.1.1",
+  "neighbors": [
+    {
+      "address": "10.0.0.1",
+      "remote_as": 65002,
+      "description": "ISP Primary"
+    },
+    {
+      "address": "10.0.0.5",
+      "remote_as": 65003,
+      "description": "ISP Backup"
+    }
+  ],
+  "networks": ["192.168.0.0/16"]
+}</code></pre>
+
+                    <h3>BGP Attributes</h3>
+                    <table>
+                        <thead>
+                            <tr><th>Attribute</th><th>Description</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>Local Preference</td><td>Preferred exit point from AS</td></tr>
+                            <tr><td>AS Path</td><td>Sequence of ASes to destination</td></tr>
+                            <tr><td>MED</td><td>Suggested entry point to AS</td></tr>
+                            <tr><td>Community</td><td>Tag for policy routing</td></tr>
+                        </tbody>
+                    </table>
+                </section>
+
+                <section id="backup">
+                    <h2>Backup & Restore</h2>
+                    
+                    <h3>Configuration Export</h3>
+                    <p>Export all configuration to a single JSON file:</p>
+                    <pre class="code-block"><code>GET /api/config/export
+
+# Save to file
+curl -k https://192.168.1.1/api/config/export \
+  -b cookies.txt > quickfw-backup-$(date +%Y%m%d).json</code></pre>
+
+                    <h3>Configuration Import</h3>
+                    <p>Restore configuration from backup:</p>
+                    <pre class="code-block"><code>POST /api/config/import
+{
+  "firewall": { ... },
+  "nat": { ... },
+  "settings": { ... },
+  "routes": { ... },
+  "roles": { ... }
+}</code></pre>
+
+                    <h3>Automatic Backups</h3>
+                    <p>QuickFW automatically creates backups before configuration changes:</p>
+                    <ul>
+                        <li>Location: <code>/etc/quickfw/backups/</code></li>
+                        <li>Format: <code>&lt;config&gt;.yaml.&lt;timestamp&gt;.bak</code></li>
+                        <li>Retention: Last 50 backups per config file</li>
+                    </ul>
+
+                    <h3>Restore from Backup</h3>
+                    <pre class="code-block"><code>POST /api/config/restore
+{
+  "name": "firewall.yaml.1709836800.bak",
+  "confirm_password": "your-admin-password"
+}</code></pre>
+                </section>
+
+                <section id="updates">
+                    <h2>System Updates</h2>
+                    
+                    <h3>Update Process</h3>
+                    <ol>
+                        <li>Export current configuration</li>
+                        <li>Download latest QuickFW ISO</li>
+                        <li>Create new bootable media</li>
+                        <li>Boot from new media</li>
+                        <li>Import saved configuration</li>
+                    </ol>
+
+                    <div class="callout callout-warning">
+                        <div class="callout-title">Configuration Compatibility</div>
+                        <p>Major version updates may require configuration migration. Always review release notes before updating.</p>
+                    </div>
+                </section>
+
+                <section id="logging">
+                    <h2>Logging & Syslog</h2>
+                    
+                    <h3>Local Logging</h3>
+                    <p>QuickFW stores logs in several locations:</p>
+                    <table>
+                        <thead>
+                            <tr><th>Log File</th><th>Contents</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>/var/log/quickfw/audit.log</td><td>API audit trail</td></tr>
+                            <tr><td>/var/log/syslog</td><td>System messages</td></tr>
+                            <tr><td>/var/log/daemon.log</td><td>Service logs</td></tr>
+                            <tr><td>/var/log/frr/*.log</td><td>Routing daemon logs</td></tr>
+                        </tbody>
+                    </table>
+
+                    <h3>Syslog Forwarding</h3>
+                    <p>Forward logs to a central syslog server:</p>
+                    <pre class="code-block"><code>POST /api/syslog
+{
+  "enabled": true,
+  "server": "192.168.1.100",
+  "port": 514,
+  "protocol": "udp",
+  "facility": "local0"
+}</code></pre>
+
+                    <h3>Log Levels</h3>
+                    <table>
+                        <thead>
+                            <tr><th>Level</th><th>Description</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>DEBUG</td><td>Detailed debugging info</td></tr>
+                            <tr><td>INFO</td><td>General information</td></tr>
+                            <tr><td>NOTICE</td><td>Normal but significant</td></tr>
+                            <tr><td>WARNING</td><td>Warning conditions</td></tr>
+                            <tr><td>ERR</td><td>Error conditions</td></tr>
+                            <tr><td>CRIT</td><td>Critical conditions</td></tr>
+                        </tbody>
+                    </table>
+                </section>
+
+                <section id="troubleshooting">
+                    <h2>Troubleshooting</h2>
+                    
+                    <h3>System Services</h3>
+                    <p>Check service status:</p>
+                    <pre class="code-block"><code>systemctl status quickfw-api
+systemctl status quickfw-cli
+systemctl status nftables
+systemctl status dnsmasq
+systemctl status frr</code></pre>
+
+                    <h3>Network Diagnostics</h3>
+                    
+                    <h4>Connectivity Tests</h4>
+                    <pre class="code-block"><code># Test from web UI
+POST /api/tools/ping
+{ "host": "8.8.8.8", "count": 4 }
+
+POST /api/tools/traceroute
+{ "host": "example.com" }</code></pre>
+
+                    <h4>ARP Table</h4>
+                    <pre class="code-block"><code>GET /api/tools/arp</code></pre>
+
+                    <h3>Firewall Debugging</h3>
+                    <pre class="code-block"><code># View nftables ruleset
+nft list ruleset
+
+# View chain counters
+nft list chain inet gfw_rs gfw_fw_forward
+
+# View connection tracking
+conntrack -L</code></pre>
+
+                    <h3>Common Issues</h3>
+                    
+                    <h4>No Internet Access</h4>
+                    <ol>
+                        <li>Check WAN interface has IP: <code>ip addr show eth0</code></li>
+                        <li>Verify default route: <code>ip route show</code></li>
+                        <li>Test DNS resolution: <code>nslookup google.com</code></li>
+                        <li>Check firewall rules aren't blocking</li>
+                        <li>Verify NAT masquerade is configured</li>
+                    </ol>
+
+                    <h4>Cannot Access Web UI</h4>
+                    <ol>
+                        <li>Verify quickfw-api service is running</li>
+                        <li>Check TLS certificates exist: <code>ls /etc/quickfw/tls.*</code></li>
+                        <li>Verify port 443 is listening: <code>ss -tlnp | grep 443</code></li>
+                        <li>Check firewall allows port 443 on input</li>
+                    </ol>
+
+                    <h4>High CPU Usage</h4>
+                    <ol>
+                        <li>Check active connections: <code>cat /proc/sys/net/netfilter/nf_conntrack_count</code></li>
+                        <li>Review firewall rule complexity</li>
+                        <li>Check for packet flooding</li>
+                        <li>Review logs for errors</li>
+                    </ol>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <script src="../js/main.js"></script>
+</body>
+</html>

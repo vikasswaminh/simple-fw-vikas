@@ -1,0 +1,865 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Developer Guide — QuickFW Documentation</title>
+    <meta name="description" content="API-first developer guide for QuickFW. Learn to integrate with the REST API, build custom clients, extend functionality, and contribute to the project.">
+    <link rel="stylesheet" href="../css/main.css">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="nav-brand">
+            <svg class="brand-icon" viewBox="0 0 32 32" fill="none">
+                <rect width="32" height="32" rx="6" fill="#2563eb"/>
+                <path d="M16 5L7 10v7c0 5 3.8 9.7 9 11 5.2-1.3 9-6 9-11v-7L16 5z" fill="white"/>
+            </svg>
+            <span class="brand-name">QuickFW Docs</span>
+        </div>
+        <button class="nav-toggle" aria-label="Toggle navigation">
+            <span></span><span></span><span></span>
+        </button>
+        <ul class="nav-menu">
+            <li><a href="../index.html">Home</a></li>
+            <li><a href="user-guide.html">User Guide</a></li>
+            <li><a href="admin-guide.html">Admin Guide</a></li>
+            <li><a href="developer-guide.html" class="active">Developer Guide</a></li>
+            <li><a href="../api-reference/index.html">API Reference</a></li>
+        </ul>
+    </nav>
+
+    <div class="docs-layout">
+        <!-- Sidebar -->
+        <aside class="docs-sidebar">
+            <div class="sidebar-search">
+                <input type="text" placeholder="Search guide...">
+            </div>
+            <nav class="sidebar-nav">
+                <div class="sidebar-section">
+                    <div class="sidebar-section-title">API Fundamentals</div>
+                    <a href="#api-first" class="sidebar-link">API-First Approach</a>
+                    <a href="#authentication" class="sidebar-link">Authentication</a>
+                    <a href="#request-response" class="sidebar-link">Request/Response Format</a>
+                    <a href="#error-handling" class="sidebar-link">Error Handling</a>
+                </div>
+                <div class="sidebar-section">
+                    <div class="sidebar-section-title">Integration</div>
+                    <a href="#curl-examples" class="sidebar-link">cURL Examples</a>
+                    <a href="#python-client" class="sidebar-link">Python Client</a>
+                    <a href="#javascript-client" class="sidebar-link">JavaScript Client</a>
+                    <a href="#go-client" class="sidebar-link">Go Client</a>
+                </div>
+                <div class="sidebar-section">
+                    <div class="sidebar-section-title">Development</div>
+                    <a href="#local-setup" class="sidebar-link">Local Development</a>
+                    <a href="#testing" class="sidebar-link">Testing</a>
+                    <a href="#contributing" class="sidebar-link">Contributing</a>
+                </div>
+            </nav>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="docs-main">
+            <div class="breadcrumbs">
+                <a href="../index.html">Home</a>
+                <span class="separator">/</span>
+                <span>Developer Guide</span>
+            </div>
+
+            <header class="docs-header">
+                <h1>QuickFW Developer Guide</h1>
+                <p>API-first development guide for integrating with QuickFW, building custom clients, extending functionality, and contributing to the project.</p>
+            </header>
+
+            <div class="docs-content">
+                <section id="api-first">
+                    <h2>API-First Approach</h2>
+                    <p>QuickFW is built with an API-first architecture. All functionality exposed through the web UI is available via the REST API, making it ideal for automation, integration, and custom client development.</p>
+
+                    <h3>Design Principles</h3>
+                    <ul>
+                        <li><strong>Everything is an API</strong> — All features accessible via HTTP</li>
+                        <li><strong>Consistent patterns</strong> — RESTful design with predictable URLs</li>
+                        <li><strong>Comprehensive</strong> — Full CRUD for all configuration objects</li>
+                        <li><strong>Secure</strong> — Session-based auth with CSRF protection</li>
+                        <li><strong>Documented</strong> — OpenAPI-compatible JSON responses</li>
+                    </ul>
+
+                    <h3>API Architecture</h3>
+                    <pre class="code-block"><code>┌─────────────────────────────────────────────────────────────┐
+│                      Client Applications                     │
+│  (Web UI, CLI, Custom Scripts, Monitoring Systems)         │
+└──────────────────────┬──────────────────────────────────────┘
+                       │ HTTPS
+┌──────────────────────▼──────────────────────────────────────┐
+│                   REST API (Axum/Rust)                      │
+│  ┌──────────────┬──────────────┬──────────────┐             │
+│  │   System     │   Firewall   │    NAT       │             │
+│  │   Routes     │   Routing    │   Tools      │             │
+│  └──────────────┴──────────────┴──────────────┘             │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+┌──────────────────────▼──────────────────────────────────────┐
+│                   Core Libraries (Rust)                     │
+│  ┌──────────────┬──────────────┬──────────────┐             │
+│  │   gfw-io     │  gfw-ifmgr   │   routing    │             │
+│  │  (NFQUEUE)   │ (Interfaces) │ (OSPF/BGP)   │             │
+│  └──────────────┴──────────────┴──────────────┘             │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+┌──────────────────────▼──────────────────────────────────────┐
+│                   System Integration                        │
+│       nftables    FRR    dnsmasq    systemd                 │
+└─────────────────────────────────────────────────────────────┘</code></pre>
+                </section>
+
+                <section id="authentication">
+                    <h2>Authentication</h2>
+                    
+                    <h3>Session-Based Authentication</h3>
+                    <p>QuickFW uses session cookies for web clients and supports Basic Auth for API clients.</p>
+
+                    <h4>Login Flow</h4>
+                    <ol>
+                        <li>POST credentials to <code>/api/auth/login</code></li>
+                        <li>Receive session cookie (<code>quickfw_session</code>)</li>
+                        <li>Include cookie in subsequent requests</li>
+                        <li>Session expires after 30 minutes of inactivity</li>
+                    </ol>
+
+                    <h4>Basic Authentication</h4>
+                    <p>For API clients and scripts:</p>
+                    <pre class="code-block"><code># Include Basic Auth header
+Authorization: Basic base64(username:password)</code></pre>
+
+                    <h4>Login Request</h4>
+                    <pre class="code-block"><code>POST /api/auth/login
+Content-Type: application/json
+
+{
+  "username": "admin",
+  "password": "your-password"
+}
+
+# Response
+{
+  "token": "session-token-string",
+  "expires_in_seconds": 1800
+}
+
+# Also sets cookie: quickfw_session=...; HttpOnly; Secure; SameSite=Strict</code></pre>
+
+                    <h4>Password Change</h4>
+                    <pre class="code-block"><code>POST /api/auth/password
+Content-Type: application/json
+
+{
+  "current": "old-password",
+  "new": "new-password"
+}</code></pre>
+
+                    <h3>Rate Limiting</h3>
+                    <p>API requests are rate-limited per IP address:</p>
+                    <ul>
+                        <li><strong>General API</strong>: 60 requests per minute</li>
+                        <li><strong>Auth endpoints</strong>: 5 failed attempts trigger 15-minute lockout</li>
+                    </ul>
+                </section>
+
+                <section id="request-response">
+                    <h2>Request/Response Format</h2>
+                    
+                    <h3>Content Types</h3>
+                    <table>
+                        <thead>
+                            <tr><th>Format</th><th>Content-Type</th><th>Usage</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>JSON</td><td>application/json</td><td>All API requests/responses</td></tr>
+                            <tr><td>YAML</td><td>application/x-yaml</td><td>Config export/import (optional)</td></tr>
+                        </tbody>
+                    </table>
+
+                    <h3>Standard Response Structure</h3>
+                    <pre class="code-block"><code>// Success response (2xx)
+{
+  "message": "Operation completed",
+  "data": { ... }
+}
+
+// Error response (4xx/5xx)
+{
+  "error": "error_code",
+  "message": "Human-readable description",
+  "detail": { ... }  // Additional context
+}</code></pre>
+
+                    <h3>HTTP Status Codes</h3>
+                    <table>
+                        <thead>
+                            <tr><th>Code</th><th>Meaning</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>200 OK</td><td>Request successful</td></tr>
+                            <tr><td>201 Created</td><td>Resource created successfully</td></tr>
+                            <tr><td>400 Bad Request</td><td>Invalid request parameters</td></tr>
+                            <tr><td>401 Unauthorized</td><td>Authentication required</td></tr>
+                            <tr><td>403 Forbidden</td><td>Insufficient permissions</td></tr>
+                            <tr><td>404 Not Found</td><td>Resource not found</td></tr>
+                            <tr><td>429 Too Many Requests</td><td>Rate limit exceeded</td></tr>
+                            <tr><td>500 Internal Error</td><td>Server error</td></tr>
+                        </tbody>
+                    </table>
+
+                    <h3>Common Request Patterns</h3>
+                    
+                    <h4>List Resources</h4>
+                    <pre class="code-block"><code>GET /api/interfaces
+GET /api/routes
+GET /api/firewall</code></pre>
+
+                    <h4>Get Single Resource</h4>
+                    <pre class="code-block"><code>GET /api/interfaces/eth0
+GET /api/firewall/counters</code></pre>
+
+                    <h4>Create/Update Resource</h4>
+                    <pre class="code-block"><code>POST /api/firewall
+PUT /api/interfaces/eth0/config</code></pre>
+
+                    <h4>Delete Resource</h4>
+                    <pre class="code-block"><code>DELETE /api/nat/port_forward/1</code></pre>
+                </section>
+
+                <section id="error-handling">
+                    <h2>Error Handling</h2>
+                    
+                    <h3>Error Response Format</h3>
+                    <pre class="code-block"><code>{
+  "error": "validation_failed",
+  "detail": "Invalid port number: 99999"
+}</code></pre>
+
+                    <h3>Common Error Types</h3>
+                    <table>
+                        <thead>
+                            <tr><th>Error Code</th><th>Description</th><th>Action</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>validation_failed</td><td>Input validation error</td><td>Check request parameters</td></tr>
+                            <tr><td>unauthorized</td><td>Invalid credentials</td><td>Re-authenticate</td></tr>
+                            <tr><td>password_change_required</td><td>Must change default password</td><td>Change password first</td></tr>
+                            <tr><td>rate_limit_exceeded</td><td>Too many requests</td><td>Wait before retrying</td></tr>
+                        </tbody>
+                    </table>
+
+                    <h3>Client-Side Error Handling</h3>
+                    <pre class="code-block"><code>// Python example
+import requests
+
+response = requests.post(url, json=data)
+if response.status_code == 401:
+    # Re-authenticate
+    login()
+elif response.status_code == 429:
+    # Back off and retry
+    time.sleep(int(response.headers.get('Retry-After', 60)))
+elif not response.ok:
+    error = response.json()
+    raise ApiError(f"{error['error']}: {error.get('detail', '')}")</code></pre>
+                </section>
+
+                <section id="curl-examples">
+                    <h2>cURL Examples</h2>
+                    
+                    <h3>Authentication</h3>
+                    <pre class="code-block"><code># Login and save cookies
+curl -k -X POST https://192.168.1.1/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"quickfw"}' \
+  -c cookies.txt
+
+# Use saved cookies for subsequent requests
+curl -k https://192.168.1.1/api/system/info -b cookies.txt
+
+# Or use Basic Auth
+curl -k -u admin:quickfw https://192.168.1.1/api/system/info</code></pre>
+
+                    <h3>System Information</h3>
+                    <pre class="code-block"><code># Get system info
+curl -k https://192.168.1.1/api/system/info -b cookies.txt
+
+# Get traffic snapshot
+curl -k https://192.168.1.1/api/system/traffic -b cookies.txt</code></pre>
+
+                    <h3>Firewall Management</h3>
+                    <pre class="code-block"><code># Get current firewall config
+curl -k https://192.168.1.1/api/firewall -b cookies.txt
+
+# Apply new firewall rules
+curl -k -X POST https://192.168.1.1/api/firewall \
+  -b cookies.txt \
+  -H "Content-Type: application/json" \
+  -d '{
+    "forward_policy": "drop",
+    "input_policy": "drop",
+    "output_policy": "accept",
+    "rules": [
+      {
+        "name": "Allow HTTP",
+        "direction": "forward",
+        "protocol": "tcp",
+        "dst_port": "80,443",
+        "action": "accept",
+        "enabled": true
+      }
+    ]
+  }'</code></pre>
+
+                    <h3>NAT Configuration</h3>
+                    <pre class="code-block"><code># Configure masquerade
+curl -k -X POST https://192.168.1.1/api/nat \
+  -b cookies.txt \
+  -H "Content-Type: application/json" \
+  -d '{
+    "masquerade": [
+      {
+        "out_interface": "eth0",
+        "source_cidr": "192.168.1.0/24"
+      }
+    ],
+    "port_forward": [
+      {
+        "protocol": "tcp",
+        "dest_port": 443,
+        "forward_to": "192.168.1.10:443",
+        "in_interface": "eth0"
+      }
+    ]
+  }'</code></pre>
+
+                    <h3>Backup and Restore</h3>
+                    <pre class="code-block"><code># Export configuration
+curl -k https://192.168.1.1/api/config/export \
+  -b cookies.txt > backup.json
+
+# Import configuration
+curl -k -X POST https://192.168.1.1/api/config/import \
+  -b cookies.txt \
+  -H "Content-Type: application/json" \
+  -d @backup.json</code></pre>
+                </section>
+
+                <section id="python-client">
+                    <h2>Python Client</h2>
+                    
+                    <h3>Complete Python Client Example</h3>
+                    <pre class="code-block"><code>#!/usr/bin/env python3
+"""QuickFW API Client Example"""
+
+import requests
+import json
+from typing import Dict, Any, Optional
+from urllib.parse import urljoin
+
+class QuickFWClient:
+    def __init__(self, base_url: str, verify_ssl: bool = False):
+        self.base_url = base_url.rstrip('/')
+        self.session = requests.Session()
+        self.session.verify = verify_ssl
+    
+    def login(self, username: str, password: str) -> bool:
+        """Authenticate and establish session."""
+        response = self.session.post(
+            f"{self.base_url}/api/auth/login",
+            json={"username": username, "password": password}
+        )
+        return response.ok
+    
+    def get_system_info(self) -> Dict[str, Any]:
+        """Get system information."""
+        response = self.session.get(f"{self.base_url}/api/system/info")
+        response.raise_for_status()
+        return response.json()
+    
+    def get_interfaces(self) -> list:
+        """List network interfaces."""
+        response = self.session.get(f"{self.base_url}/api/interfaces")
+        response.raise_for_status()
+        return response.json().get('interfaces', [])
+    
+    def apply_firewall(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        """Apply firewall configuration."""
+        response = self.session.post(
+            f"{self.base_url}/api/firewall",
+            json=config
+        )
+        response.raise_for_status()
+        return response.json()
+    
+    def ping(self, host: str, count: int = 4) -> Dict[str, Any]:
+        """Ping a host."""
+        response = self.session.post(
+            f"{self.base_url}/api/tools/ping",
+            json={"host": host, "count": count}
+        )
+        response.raise_for_status()
+        return response.json()
+    
+    def logout(self) -> bool:
+        """End session."""
+        response = self.session.post(f"{self.base_url}/api/auth/logout")
+        return response.ok
+
+
+# Usage example
+if __name__ == "__main__":
+    client = QuickFWClient("https://192.168.1.1")
+    
+    # Login
+    if client.login("admin", "your-password"):
+        print("Login successful")
+        
+        # Get system info
+        info = client.get_system_info()
+        print(f"Hostname: {info['hostname']}")
+        print(f"Uptime: {info['uptime_seconds']}s")
+        
+        # List interfaces
+        interfaces = client.get_interfaces()
+        for iface in interfaces:
+            print(f"Interface: {iface['name']} - {'UP' if iface['link_up'] else 'DOWN'}")
+        
+        # Logout
+        client.logout()
+    else:
+        print("Login failed")</code></pre>
+                </section>
+
+                <section id="javascript-client">
+                    <h2>JavaScript Client</h2>
+                    
+                    <h3>Browser-Based Client</h3>
+                    <pre class="code-block"><code>class QuickFWClient {
+  constructor(baseUrl) {
+    this.baseUrl = baseUrl.replace(/\/$/, '');
+  }
+
+  async login(username, password) {
+    const response = await fetch(`${this.baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ username, password })
+    });
+    
+    if (!response.ok) {
+      throw new Error('Login failed');
+    }
+    
+    return response.json();
+  }
+
+  async getSystemInfo() {
+    const response = await fetch(`${this.baseUrl}/api/system/info`, {
+      credentials: 'include'
+    });
+    
+    if (!response.ok) {
+      if (response.status === 401) {
+        throw new Error('Unauthorized');
+      }
+      throw new Error(`HTTP ${response.status}`);
+    }
+    
+    return response.json();
+  }
+
+  async applyFirewall(config) {
+    const response = await fetch(`${this.baseUrl}/api/firewall`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(config)
+    });
+    
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || error.error || 'Request failed');
+    }
+    
+    return response.json();
+  }
+
+  async ping(host, count = 4) {
+    const response = await fetch(`${this.baseUrl}/api/tools/ping`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ host, count })
+    });
+    
+    return response.json();
+  }
+
+  async logout() {
+    await fetch(`${this.baseUrl}/api/auth/logout`, {
+      method: 'POST',
+      credentials: 'include'
+    });
+  }
+}
+
+// Usage
+const client = new QuickFWClient('https://192.168.1.1');
+
+async function main() {
+  try {
+    await client.login('admin', 'password');
+    
+    const info = await client.getSystemInfo();
+    console.log('Hostname:', info.hostname);
+    
+    const ping = await client.ping('8.8.8.8');
+    console.log('Ping result:', ping.stdout);
+    
+    await client.logout();
+  } catch (err) {
+    console.error('Error:', err.message);
+  }
+}
+
+main();</code></pre>
+
+                    <h3>Node.js Client</h3>
+                    <pre class="code-block"><code>const https = require('https');
+const fs = require('fs');
+
+class QuickFWNodeClient {
+  constructor(baseUrl, options = {}) {
+    this.baseUrl = new URL(baseUrl);
+    this.cookieJar = new Map();
+    this.rejectUnauthorized = options.rejectUnauthorized !== false;
+  }
+
+  request(path, options = {}) {
+    return new Promise((resolve, reject) => {
+      const url = new URL(path, this.baseUrl);
+      
+      const req = https.request(url, {
+        method: options.method || 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Cookie': this.getCookieHeader(),
+          ...options.headers
+        },
+        rejectUnauthorized: this.rejectUnauthorized
+      }, (res) => {
+        // Save cookies
+        const setCookie = res.headers['set-cookie'];
+        if (setCookie) {
+          setCookie.forEach(cookie => {
+            const [name, value] = cookie.split(';')[0].split('=');
+            this.cookieJar.set(name, value);
+          });
+        }
+
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          try {
+            resolve(JSON.parse(data));
+          } catch {
+            resolve(data);
+          }
+        });
+      });
+
+      if (options.body) {
+        req.write(JSON.stringify(options.body));
+      }
+
+      req.on('error', reject);
+      req.end();
+    });
+  }
+
+  getCookieHeader() {
+    return Array.from(this.cookieJar.entries())
+      .map(([k, v]) => `${k}=${v}`)
+      .join('; ');
+  }
+
+  async login(username, password) {
+    return this.request('/api/auth/login', {
+      method: 'POST',
+      body: { username, password }
+    });
+  }
+
+  async getSystemInfo() {
+    return this.request('/api/system/info');
+  }
+}
+
+module.exports = QuickFWNodeClient;</code></pre>
+                </section>
+
+                <section id="go-client">
+                    <h2>Go Client</h2>
+                    
+                    <pre class="code-block"><code>package main
+
+import (
+	"bytes"
+	"crypto/tls"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/cookiejar"
+	"time"
+)
+
+// Client represents a QuickFW API client
+type Client struct {
+	BaseURL    string
+	HTTPClient *http.Client
+}
+
+// NewClient creates a new QuickFW client
+func NewClient(baseURL string, skipVerify bool) *Client {
+	jar, _ := cookiejar.New(nil)
+	
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: skipVerify,
+		},
+	}
+	
+	return &Client{
+		BaseURL: baseURL,
+		HTTPClient: &http.Client{
+			Transport: tr,
+			Jar:       jar,
+			Timeout:   30 * time.Second,
+		},
+	}
+}
+
+// Login authenticates with the QuickFW appliance
+func (c *Client) Login(username, password string) error {
+	payload := map[string]string{
+		"username": username,
+		"password": password,
+	}
+	
+	_, err := c.post("/api/auth/login", payload)
+	return err
+}
+
+// GetSystemInfo retrieves system information
+func (c *Client) GetSystemInfo() (*SystemInfo, error) {
+	resp, err := c.get("/api/system/info")
+	if err != nil {
+		return nil, err
+	}
+	
+	var info SystemInfo
+	if err := json.Unmarshal(resp, &info); err != nil {
+		return nil, err
+	}
+	
+	return &info, nil
+}
+
+// ApplyFirewall applies firewall configuration
+func (c *Client) ApplyFirewall(config FirewallConfig) error {
+	_, err := c.post("/api/firewall", config)
+	return err
+}
+
+// Helper methods
+func (c *Client) get(path string) ([]byte, error) {
+	resp, err := c.HTTPClient.Get(c.BaseURL + path)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	
+	var buf bytes.Buffer
+	buf.ReadFrom(resp.Body)
+	return buf.Bytes(), nil
+}
+
+func (c *Client) post(path string, payload interface{}) ([]byte, error) {
+	body, _ := json.Marshal(payload)
+	resp, err := c.HTTPClient.Post(
+		c.BaseURL+path,
+		"application/json",
+		bytes.NewBuffer(body),
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	
+	var buf bytes.Buffer
+	buf.ReadFrom(resp.Body)
+	return buf.Bytes(), nil
+}
+
+// Types
+type SystemInfo struct {
+	Hostname         string  `json:"hostname"`
+	Version          string  `json:"version"`
+	UptimeSeconds    float64 `json:"uptime_seconds"`
+	CpuUsagePercent  float64 `json:"cpu_usage_percent"`
+	MemoryTotalMB    uint64  `json:"memory_total_mb"`
+	MemoryUsedMB     uint64  `json:"memory_used_mb"`
+}
+
+type FirewallConfig struct {
+	ForwardPolicy string       `json:"forward_policy"`
+	InputPolicy   string       `json:"input_policy"`
+	OutputPolicy  string       `json:"output_policy"`
+	Rules         []FirewallRule `json:"rules"`
+}
+
+type FirewallRule struct {
+	Name      string `json:"name"`
+	Direction string `json:"direction"`
+	Protocol  string `json:"protocol"`
+	Action    string `json:"action"`
+	Enabled   bool   `json:"enabled"`
+}</code></pre>
+                </section>
+
+                <section id="local-setup">
+                    <h2>Local Development Setup</h2>
+                    
+                    <h3>Prerequisites</h3>
+                    <ul>
+                        <li>Rust 1.70+ (with Cargo)</li>
+                        <li>Node.js 18+ (for frontend development)</li>
+                        <li>Docker (for ISO builds)</li>
+                        <li>Linux environment (for NFQUEUE testing)</li>
+                    </ul>
+
+                    <h3>Repository Structure</h3>
+                    <pre class="code-block"><code>quickfw/
+├── Cargo.toml           # Workspace configuration
+├── io/                  # Packet I/O library (NFQUEUE)
+├── ifmgr/              # Interface management
+├── routing/            # OSPF/BGP/FRR integration
+├── config/             # YAML config parsing
+├── quickfw-api/        # REST API server
+├── quickfw-cli/        # Cisco-style CLI
+├── quickfw-setup/      # First-boot setup wizard
+├── front/              # Web UI (vanilla JS)
+├── rootfs/             # ISO root filesystem overlay
+└── tests/              # Integration tests</code></pre>
+
+                    <h3>Building from Source</h3>
+                    <pre class="code-block"><code># Clone repository
+git clone https://github.com/quickfw/quickfw.git
+cd quickfw
+
+# Build all binaries
+cargo build --release
+
+# Run tests
+cargo test
+
+# Build ISO (requires Docker)
+bash build.sh</code></pre>
+
+                    <h3>Development Server</h3>
+                    <pre class="code-block"><code># Run API server locally
+cargo run --bin quickfw-api
+
+# Server will start on:
+# - HTTPS: https://0.0.0.0:443 (requires root/sudo for port binding)
+# - HTTP redirect: http://0.0.0.0:3000
+
+# Run with custom log level
+QUICKFW_LOG=debug cargo run --bin quickfw-api</code></pre>
+                </section>
+
+                <section id="testing">
+                    <h2>Testing</h2>
+                    
+                    <h3>Unit Tests</h3>
+                    <pre class="code-block"><code># Run all unit tests
+cargo test
+
+# Run tests for specific crate
+cargo test -p gfw-io
+cargo test -p quickfw-api
+
+# Run with output
+cargo test -- --nocapture</code></pre>
+
+                    <h3>Integration Tests</h3>
+                    <pre class="code-block"><code># Install test dependencies
+cd tests
+npm install
+
+# Run integration tests (requires running API server)
+npm test</code></pre>
+
+                    <h3>API Testing with curl</h3>
+                    <pre class="code-block"><code># Health check
+curl -k https://localhost/api/health
+
+# Test authentication
+curl -k -X POST https://localhost/api/auth/login \
+  -d '{"username":"admin","password":"quickfw"}'</code></pre>
+                </section>
+
+                <section id="contributing">
+                    <h2>Contributing</h2>
+                    
+                    <h3>Development Workflow</h3>
+                    <ol>
+                        <li>Fork the repository</li>
+                        <li>Create a feature branch</li>
+                        <li>Make your changes</li>
+                        <li>Run tests: <code>cargo test</code></li>
+                        <li>Format code: <code>cargo fmt</code></li>
+                        <li>Run clippy: <code>cargo clippy</code></li>
+                        <li>Submit pull request</li>
+                    </ol>
+
+                    <h3>Code Standards</h3>
+                    <ul>
+                        <li>Follow Rust naming conventions</li>
+                        <li>Add documentation comments for public APIs</li>
+                        <li>Include unit tests for new functionality</li>
+                        <li>Handle errors properly using <code>Result</code></li>
+                        <li>Validate all user inputs</li>
+                    </ul>
+
+                    <h3>Security Considerations</h3>
+                    <ul>
+                        <li>Never trust user input — always validate</li>
+                        <li>Use prepared statements or equivalent</li>
+                        <li>Sanitize data before system calls</li>
+                        <li>Follow principle of least privilege</li>
+                        <li>Add audit logging for sensitive operations</li>
+                    </ul>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <script src="../js/main.js"></script>
+</body>
+</html>

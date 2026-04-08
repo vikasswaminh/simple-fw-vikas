@@ -1,0 +1,16 @@
+# Cloudflare Pages Configuration
+# https://developers.cloudflare.com/pages/platform/wrangler-configuration/
+
+name = "quickfw-docs"
+compatibility_date = "2026-04-08"
+
+# Build settings (not needed for static sites, but good for documentation)
+[build]
+command = ""
+
+# Environment variables (if needed)
+[env.production]
+vars = { ENVIRONMENT = "production" }
+
+[env.staging]
+vars = { ENVIRONMENT = "staging" }

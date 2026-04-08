@@ -1,0 +1,16 @@
+# Cloudflare Pages Redirects Configuration
+# https://developers.cloudflare.com/pages/platform/redirects/
+
+# Redirect old URLs to new structure
+/guides/api-reference.html /api-reference/index.html 301
+/guides/technical.html /technical/index.html 301
+
+# Clean URL redirects
+/guides/user-guide /guides/user-guide.html 301
+/guides/admin-guide /guides/admin-guide.html 301
+/guides/developer-guide /guides/developer-guide.html 301
+/api-reference /api-reference/index.html 301
+/technical /technical/index.html 301
+
+# SPA fallback (if needed for client-side routing)
+# /* /index.html 200
