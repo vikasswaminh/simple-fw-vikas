@@ -8,14 +8,22 @@ This document provides everything an AI coding agent needs to know about the Qui
 
 **QuickFW** is a lightweight, high-performance L3/L4 stateful firewall appliance written in Rust. It is designed to run as a Debian-based live ISO and provides:
 
-- A **Cisco IOS-style CLI** on the console (tty1/serial).
-- A **web dashboard** served over HTTPS on port 443.
-- A **REST API** for automation and for the CLI to consume.
-- **Default-deny firewall** semantics (INPUT DROP, FORWARD DROP).
-- **NAT** (masquerade + port forwarding) via nftables.
-- **Interface management** with WAN/LAN role assignments.
-- **DHCP/DNS** server for the LAN via dnsmasq.
-- **OSPF / BGP / RIP** routing protocol support via FRR.
+- A **Cisco IOS-style CLI** on the console (tty1/serial)
+- A **web dashboard** served over HTTPS on port 443 (with HTTP redirect on port 3000)
+- A **REST API** for automation and for the CLI to consume
+- **Default-deny firewall** semantics (INPUT DROP, FORWARD DROP)
+- **NAT** (masquerade + port forwarding) via nftables
+- **Interface management** with WAN/LAN role assignments
+- **DHCP/DNS** server for the LAN via dnsmasq
+- **OSPF / BGP / RIP** routing protocol support via FRR
+
+### Architecture Diagram
+
+```
+Console CLI ──┐
+              ├──→ quickfw-api (Axum REST) ──→ nftables (kernel)
+Web Browser ──┘
+```
 
 ---
 
@@ -32,7 +40,7 @@ This document provides everything an AI coding agent needs to know about the Qui
 | DHCP/DNS | dnsmasq |
 | Process supervision | systemd |
 | ISO build | Docker + Debian `live-build` |
-| Frontend | Vanilla JS SPA (no build step) |
+| Frontend | Vanilla JS SPA (Vite + TypeScript + Tailwind CSS) |
 
 ---
 
@@ -52,12 +60,11 @@ This is a Cargo workspace. The root `Cargo.toml` lists the following members:
 
 Additional directories:
 
-- `front/` — Static web frontend (HTML, CSS, vanilla JS). Served by `quickfw-api`.
+- `front/` — Static web frontend (HTML, CSS, TypeScript). Served by `quickfw-api`.
 - `rootfs/` — Root filesystem overlay for the ISO. Contains systemd units, sysctl tuning, base nftables config, and issue/profile scripts.
 - `scripts/` — Bash helper scripts (`quickfw-console` emergency recovery, `quickfw-irq-tune` NIC tuning).
 - `tests/` — Node.js integration tests using Playwright.
-- `Dockerfile` — Multi-stage build that compiles Rust binaries and then builds a Debian live ISO.
-- `build.sh` — Host-facing ISO builder script that drives Docker.
+- `docs-site/` — Documentation website (VitePress).
 
 ---
 
@@ -88,6 +95,13 @@ bash build.sh
 
 This creates `output/quickfw.iso` using Docker and `live-build`. The ISO is a live Debian 12 (bookworm) image with QuickFW pre-installed. **This command requires Docker and can take 10–30 minutes.**
 
+### Check formatting and linting
+
+```bash
+cargo fmt --check
+cargo clippy
+```
+
 ---
 
 ## 5. Runtime Architecture
@@ -104,20 +118,21 @@ When the appliance boots, the following systemd services are active:
 | `dnsmasq.service` | DHCP/DNS for the LAN |
 
 Key runtime paths:
-- `/etc/quickfw/` — All appliance configuration (YAML files and `admin.password`).
-- `/var/log/quickfw/` — Audit log directory.
-- `/opt/quickfw/front/` — Static web assets (populated at ISO build time).
+- `/etc/quickfw/` — All appliance configuration (YAML files and `admin.password`)
+- `/var/log/quickfw/` — Audit log directory
+- `/opt/quickfw/front/` — Static web assets (populated at ISO build time)
+- `/etc/frr/frr.conf` — FRR routing daemon configuration
 
 ---
 
 ## 6. Code Style & Conventions
 
-- **Rust Edition 2021** — use modern idioms.
-- **Comments** — Top-of-file crate/module doc comments explain the purpose. Inline comments are used for security-critical or non-obvious logic.
-- **Error handling** — Prefer `Result` and `?`. For API handlers, map errors to `(StatusCode, Json<...>)` tuples.
-- **Security-first** — Every user-supplied field that reaches nftables or a system command **must** be validated. See `quickfw-api/src/validation.rs`.
-- **Config safety** — Before overwriting any config file, the code calls `backup_config()` to create a timestamped `.bak` in `/etc/quickfw/backups/`. Atomic writes (write to `.tmp`, `fsync`, `rename`) are used for sensitive updates.
-- **No panics on bad input** — API endpoints must return HTTP 400/500, never panic, on malformed client data.
+- **Rust Edition 2021** — use modern idioms
+- **Comments** — Top-of-file crate/module doc comments explain the purpose. Inline comments are used for security-critical or non-obvious logic
+- **Error handling** — Prefer `Result` and `?`. For API handlers, map errors to `(StatusCode, Json<...>)` tuples
+- **Security-first** — Every user-supplied field that reaches nftables or a system command **must** be validated. See `quickfw-api/src/validation.rs`
+- **Config safety** — Before overwriting any config file, the code calls `backup_config()` to create a timestamped `.bak` in `/etc/quickfw/backups/`. Atomic writes (write to `.tmp`, `fsync`, `rename`) are used for sensitive updates
+- **No panics on bad input** — API endpoints must return HTTP 400/500, never panic, on malformed client data
 
 ---
 
@@ -128,12 +143,18 @@ Each crate contains `#[cfg(test)]` modules. Run them with `cargo test`.
 
 ### Integration tests
 `tests/real-test.js` is a Node.js script that uses Playwright to:
-1. Exercise the REST API (system info, interfaces, firewall rules, NAT, routes, settings, config export, auth, audit).
-2. Log in via the browser and take screenshots of each SPA page.
+1. Exercise the REST API (system info, interfaces, firewall rules, NAT, routes, settings, config export, auth, audit)
+2. Log in via the browser and take screenshots of each SPA page
 
 Prerequisites for integration tests:
-- The `quickfw-api` binary must be running locally (usually on `https://127.0.0.1`).
-- Node.js and `playwright` must be installed.
+- The `quickfw-api` binary must be running locally (usually on `https://127.0.0.1`)
+- Node.js and `playwright` must be installed
+
+### Frontend tests
+The `front/` directory contains:
+- Vitest for unit testing TypeScript code
+- Playwright for E2E testing
+- ESLint and Prettier for code quality
 
 ---
 
@@ -146,6 +167,7 @@ Prerequisites for integration tests:
 - **Rate limiting & lockout** — Per-IP API rate limit (60 req/min). After 5 failed login attempts, the IP is locked out for 15 minutes.
 - **TLS** — The API generates a self-signed ECDSA certificate on first start if `/etc/quickfw/tls.crt` and `tls.key` are missing.
 - **Re-auth for destructive ops** — Endpoints like reboot, factory reset, and config restore require the current password to be re-supplied in the request body.
+- **Security headers** — All API responses include CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy, and HSTS headers.
 
 ---
 
@@ -162,10 +184,11 @@ Prerequisites for integration tests:
 | Input validation | `quickfw-api/src/validation.rs` |
 | Auth / sessions | `quickfw-api/src/auth.rs` |
 | Audit logging | `quickfw-api/src/audit.rs` |
-| Static web UI | `front/*.js`, `front/index.html`, `front/styles.css` |
+| Static web UI | `front/src/**/*.ts`, `front/index.html`, `front/styles.css` |
 | Systemd units | `rootfs/etc/systemd/system/*.service` |
 | ISO package list / boot branding | `Dockerfile` |
 | Base nftables config | `rootfs/etc/nftables.conf` |
+| Emergency recovery console | `scripts/quickfw-console` |
 
 ---
 
@@ -173,7 +196,7 @@ Prerequisites for integration tests:
 
 | Interface | Username | Password |
 |-----------|----------|----------|
-| Web UI / API | `admin` | `quickfw` (forced change on first login is implemented) |
+| Web UI / API | `admin` | `quickfw` (forced change on first login is recommended) |
 | Linux root | `root` | Set during first-boot setup wizard |
 
 ---
@@ -188,10 +211,12 @@ The REST API is organized into these categories:
 - `POST /api/system/reboot` — Reboot (requires password confirmation)
 - `GET /api/interfaces` — List all interfaces with stats
 - `PUT /api/interfaces/{name}` — Configure interface
+- `GET /api/settings` — Get appliance settings
+- `POST /api/settings` — Update appliance settings
 
 ### Firewall
 - `GET /api/firewall` — Get firewall config (rules, policies, zones)
-- `POST /api/firewall` — Apply firewall config
+- `POST /api/firewall` — Apply firewall config (supports `?dry_run=true`)
 - `GET /api/firewall/counters` — Rule hit counters
 - `GET /api/firewall/groups` — Address/port groups
 - `POST /api/firewall/groups` — Save groups
@@ -210,11 +235,14 @@ The REST API is organized into these categories:
 - `POST /api/routing/ospf` — Configure OSPF
 - `GET /api/routing/bgp` — BGP config/status
 - `POST /api/routing/bgp` — Configure BGP
+- `GET /api/routing/rip` — RIP config/status
+- `POST /api/routing/rip` — Configure RIP
 
 ### Tools & Monitoring
 - `GET /api/conntrack` — Active connections
 - `GET /api/tools/arp` — ARP table
 - `GET /api/tools/dhcp-leases` — DHCP leases
+- `GET /api/tools/dns-local` — Local DNS entries
 - `POST /api/tools/ping` — Ping host
 - `POST /api/tools/traceroute` — Traceroute
 
@@ -222,12 +250,38 @@ The REST API is organized into these categories:
 - `POST /api/auth/login` — Session login
 - `POST /api/auth/logout` — Session logout
 - `POST /api/auth/password` — Change password
+- `POST /api/auth/ws-token` — Get WebSocket auth token
 - `GET /api/audit` — Audit log entries
 - `GET /api/config/export` — Export full config
+- `POST /api/config/import` — Import config (destructive)
+- `POST /api/config/backup` — Create backup
+- `POST /api/config/restore` — Restore from backup
+- `POST /api/factory-reset` — Factory reset (requires password)
 
 ---
 
-## 12. Quick Reference
+## 12. Configuration Files
+
+All configuration is stored in YAML format under `/etc/quickfw/`:
+
+| File | Purpose |
+|------|---------|
+| `appliance.yaml` | Network appliance configuration (WAN/LAN settings) |
+| `firewall.yaml` | Firewall rules and policies |
+| `firewall-groups.yaml` | Address and port groups |
+| `nat.yaml` | NAT masquerade and port-forward rules |
+| `routes.yaml` | Static routes |
+| `ospf.yaml` | OSPF routing configuration |
+| `bgp.yaml` | BGP routing configuration |
+| `rip.yaml` | RIP routing configuration |
+| `interfaces.yaml` | Interface role assignments |
+| `settings.yaml` | Appliance settings (hostname, etc.) |
+| `admin.password` | Admin password (Argon2 hash or plaintext for migration) |
+| `tls.crt`, `tls.key` | Self-signed TLS certificate |
+
+---
+
+## 13. Quick Reference
 
 ```bash
 # Build all binaries
@@ -244,4 +298,34 @@ cargo fmt --check
 
 # Run clippy
 cargo clippy
+
+# Run frontend dev server (in front/ directory)
+cd front && npm run dev
+
+# Build frontend for production
+cd front && npm run build
+
+# Run frontend tests
+cd front && npm test
+
+# Run E2E tests
+cd front && npm run test:e2e
 ```
+
+---
+
+## 14. Important Notes for Developers
+
+1. **Never** interpolate user input directly into nftables commands. Always use `sanitize_nft_string()` or the validation functions.
+
+2. **Always** validate input before applying firewall/NAT changes. The validation layer in `quickfw-api/src/validation.rs` must reject any malicious input.
+
+3. **Backup before change** — Use `crate::config_utils::backup_config()` before overwriting config files.
+
+4. **Atomic writes** — For sensitive files, write to `.tmp`, fsync, then rename to avoid partial writes.
+
+5. **Management safety** — The `MGMT_SAFETY` chain in nftables must always allow SSH (22), HTTPS (443), and HTTP (3000) to prevent lockout.
+
+6. **First boot** — The setup wizard only runs if `/etc/quickfw/appliance.yaml` doesn't exist. To re-run, delete this file and restart.
+
+7. **Emergency access** — If the CLI fails, tty2 provides the `quickfw-console` emergency recovery script.
