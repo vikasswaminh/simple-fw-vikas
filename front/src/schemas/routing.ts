@@ -15,7 +15,7 @@ export const OspfNetworkSchema = z.object({
 export const OspfAreaSchema = z.object({
   area_id: z.number().int().min(0),
   area_type: z.enum(['normal', 'stub', 'nssa']).default('normal'),
-  authentication: z.string().optional(),
+  authentication: z.string().nullish(),
 });
 
 // OSPF configuration
@@ -34,23 +34,23 @@ export const OspfConfigSchema = z.object({
 export const BgpNeighborSchema = z.object({
   address: IpAddressSchema,
   remote_as: z.number().int().min(1).max(65535),
-  description: z.string().max(256).optional(),
-  password: z.string().optional(),
+  description: z.string().max(256).nullish(),
+  password: z.string().nullish(),
   timers_keepalive: z.number().int().min(1).default(60),
   timers_hold: z.number().int().min(3).default(180),
   passive: z.boolean().default(false),
-  ebgp_multihop: z.number().int().min(1).max(255).optional(),
-  update_source: z.string().optional(),
+  ebgp_multihop: z.number().int().min(1).max(255).nullish(),
+  update_source: z.string().nullish(),
 });
 
 // BGP neighbor address-family settings
 export const BgpNeighborAfSchema = z.object({
   address: IpAddressSchema,
   activate: z.boolean().default(false),
-  prefix_list_in: z.string().optional(),
-  prefix_list_out: z.string().optional(),
-  route_map_in: z.string().optional(),
-  route_map_out: z.string().optional(),
+  prefix_list_in: z.string().nullish(),
+  prefix_list_out: z.string().nullish(),
+  route_map_in: z.string().nullish(),
+  route_map_out: z.string().nullish(),
   next_hop_self: z.boolean().default(false),
   soft_reconfiguration: z.boolean().default(false),
 });
@@ -78,7 +78,7 @@ export const BgpConfigSchema = z.object({
 // RIP configuration
 export const RipConfigSchema = z.object({
   enabled: z.boolean().default(false),
-  router_id: IpAddressSchema.optional(),
+  router_id: IpAddressSchema.nullish(),
   networks: z.array(CidrSchema),
   interfaces: z.array(InterfaceNameSchema),
   passive_interfaces: z.array(InterfaceNameSchema),
@@ -95,10 +95,10 @@ export const RipConfigSchema = z.object({
 export const RouteEntrySchema = z.object({
   destination: z.string(),
   gateway: z.string(),
-  interface: z.string().optional(),
+  interface: z.string().nullish(),
   protocol: z.string(),
   metric: z.number().int().nonnegative(),
-  flags: z.string().optional(),
+  flags: z.string().nullish(),
 });
 
 // Routing table

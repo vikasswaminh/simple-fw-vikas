@@ -41,7 +41,7 @@ export const SystemSettingsSchema = z.object({
 // Syslog configuration
 export const SyslogConfigSchema = z.object({
   enabled: z.boolean(),
-  remote_server: z.string().optional(),
+  remote_server: z.string().nullish(),
   remote_port: z.number().int().min(1).max(65535).default(514),
   local_logging: z.boolean().default(true),
 });
@@ -60,7 +60,7 @@ export const ConfigExportSchema = z.object({
 export const BackupInfoSchema = z.object({
   name: z.string(),
   size: z.number().int().nonnegative(),
-  created_at: z.string().datetime().optional(),
+  created_at: z.string().datetime().nullish(),
 });
 
 // Reboot request

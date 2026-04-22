@@ -1,6 +1,7 @@
 import { Component } from '@components/component';
 import { store } from '@state/store';
 import { systemApi, conntrackApi, networkApi, auditApi, routesApi } from '@api/endpoints';
+import type { ServicesMap } from '@api/endpoints';
 import { formatBytes, formatUptime, formatTimeAgo, escapeHtml } from '@utils';
 import type { SystemInfo, TrafficSnapshot, Interface, AuditEntry } from '@schemas';
 
@@ -15,6 +16,7 @@ export class DashboardPage extends Component<{
   auditEntries: AuditEntry[];
   defaultGateway: string;
   gatewayIface: string;
+  services: ServicesMap;
   loading: boolean;
   error: string | null;
   autoRefresh: boolean;
@@ -31,6 +33,7 @@ export class DashboardPage extends Component<{
       auditEntries: [],
       defaultGateway: '',
       gatewayIface: '',
+      services: {},
       loading: true,
       error: null,
       autoRefresh: true,
@@ -49,12 +52,13 @@ export class DashboardPage extends Component<{
 
   private async loadData(): Promise<void> {
     try {
-      const [systemInfo, traffic, ifaceData, conntrack, audit] = await Promise.all([
+      const [systemInfo, traffic, ifaceData, conntrack, audit, services] = await Promise.all([
         systemApi.getInfo(),
         systemApi.getTraffic(),
         networkApi.getInterfaces().catch(() => ({ interfaces: [] })),
         conntrackApi.getConnections().catch(() => []),
         auditApi.getLog().catch(() => []),
+        systemApi.getServices().catch(() => ({} as ServicesMap)),
       ]);
 
       // Try to get default gateway from routes
@@ -77,6 +81,7 @@ export class DashboardPage extends Component<{
         auditEntries: Array.isArray(audit) ? audit.slice(0, 5) : [],
         defaultGateway,
         gatewayIface,
+        services,
         loading: false,
       });
 
@@ -212,16 +217,31 @@ export class DashboardPage extends Component<{
 
       <!-- Services + Gateway row -->
       <div class="grid-2" style="margin-bottom: var(--spacing-lg);">
-        <!-- Services Card -->
+        <!-- Services Card — live from GET /api/services (systemctl is-active) -->
         <div class="card">
           <div class="card-title"><span class="icon">⚡</span> Services</div>
           <div style="margin-top: var(--spacing-md);">
-            ${['DNS Resolver', 'DHCP Server', 'NTP', 'SSH', 'Syslog'].map(svc => `
-              <div class="kv-row">
-                <span class="kv-label">${svc}</span>
-                <span class="badge badge-success badge-sm">running</span>
-              </div>
-            `).join('')}
+            ${(() => {
+              const labels: Record<string, string> = {
+                dns: 'DNS Resolver',
+                dhcp: 'DHCP Server',
+                ntp: 'NTP',
+                ssh: 'SSH',
+                syslog: 'Syslog',
+              };
+              return Object.entries(labels).map(([key, label]) => {
+                const svc = this.state.services[key];
+                const active = svc?.active ?? false;
+                return `
+                  <div class="kv-row">
+                    <span class="kv-label">${label}</span>
+                    <span class="badge ${active ? 'badge-success' : 'badge-danger'} badge-sm">
+                      ${active ? 'running' : 'stopped'}
+                    </span>
+                  </div>
+                `;
+              }).join('');
+            })()}
           </div>
         </div>
 

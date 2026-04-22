@@ -51,7 +51,7 @@ export const ConntrackEntrySchema = z.object({
   sport: z.string(),
   dport: z.string(),
   state: z.string(),
-  bytes: z.number().int().optional(),
+  bytes: z.number().int().nullish(),
 });
 
 // Conntrack response

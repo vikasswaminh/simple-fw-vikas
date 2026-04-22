@@ -16,14 +16,14 @@ export const InterfaceRoleSchema = z.enum(['wan', 'lan', 'dmz', 'unset']);
 // Interface information
 export const InterfaceSchema = z.object({
   name: InterfaceNameSchema,
-  mac: MacAddressSchema.optional(),
+  mac: MacAddressSchema.nullish(),
   link_up: z.boolean(),
   ipv4_addrs: z.array(z.string()),
   mtu: z.number().int().min(68).max(9000).default(1500),
-  speed: z.string().optional(),
-  description: z.string().max(128).optional(),
+  speed: z.string().nullish(),
+  description: z.string().max(128).nullish(),
   role: InterfaceRoleSchema,
-  zone: z.string().optional(),
+  zone: z.string().nullish(),
   rx_bytes: z.number().int().nonnegative().default(0),
   tx_bytes: z.number().int().nonnegative().default(0),
   rx_packets: z.number().int().nonnegative().default(0),
@@ -37,14 +37,14 @@ export const InterfaceSchema = z.object({
 // Interface configuration request
 export const InterfaceConfigSchema = z.object({
   name: InterfaceNameSchema,
-  mode: z.enum(['dhcp', 'static', '']).optional(),
-  address: z.string().optional(),
-  gateway: z.string().ip().optional(),
-  dns: z.array(z.string().ip()).optional(),
-  mtu: z.number().int().min(68).max(9000).optional(),
-  enabled: z.boolean().optional(),
-  description: z.string().max(128).optional(),
-  role: InterfaceRoleSchema.optional(),
+  mode: z.enum(['dhcp', 'static', '']).nullish(),
+  address: z.string().nullish(),
+  gateway: z.string().ip().nullish(),
+  dns: z.array(z.string().ip()).nullish(),
+  mtu: z.number().int().min(68).max(9000).nullish(),
+  enabled: z.boolean().nullish(),
+  description: z.string().max(128).nullish(),
+  role: InterfaceRoleSchema.nullish(),
 });
 
 // Interface role mapping
@@ -63,7 +63,7 @@ export const InterfaceRolesConfigSchema = z.object({
 export const StaticRouteSchema = z.object({
   destination: z.union([CidrSchema, z.literal('default')]),
   gateway: IpAddressSchema,
-  interface: InterfaceNameSchema.optional(),
+  interface: InterfaceNameSchema.nullish(),
   metric: z.number().int().min(0).max(65535).default(100),
 });
 

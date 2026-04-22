@@ -33,18 +33,18 @@ export const FirewallRuleSchema = z.object({
   enabled: z.boolean().default(true),
   direction: FirewallDirectionSchema.default('forward'),
   protocol: FirewallProtocolSchema.default('any'),
-  in_interface: z.union([InterfaceNameSchema, z.literal('')]).optional(),
-  out_interface: z.union([InterfaceNameSchema, z.literal('')]).optional(),
-  src_zone: z.string().max(32).optional(),
-  dst_zone: z.string().max(32).optional(),
-  src_ip: z.union([CidrSchema, z.literal(''), z.literal('any')]).optional(),
-  dst_ip: z.union([CidrSchema, z.literal(''), z.literal('any')]).optional(),
-  src_port: z.union([PortRangeSchema, z.literal(''), z.literal('any')]).optional(),
-  dst_port: z.union([PortRangeSchema, z.literal(''), z.literal('any')]).optional(),
+  in_interface: z.union([InterfaceNameSchema, z.literal('')]).nullish(),
+  out_interface: z.union([InterfaceNameSchema, z.literal('')]).nullish(),
+  src_zone: z.string().max(32).nullish(),
+  dst_zone: z.string().max(32).nullish(),
+  src_ip: z.union([CidrSchema, z.literal(''), z.literal('any')]).nullish(),
+  dst_ip: z.union([CidrSchema, z.literal(''), z.literal('any')]).nullish(),
+  src_port: z.union([PortRangeSchema, z.literal(''), z.literal('any')]).nullish(),
+  dst_port: z.union([PortRangeSchema, z.literal(''), z.literal('any')]).nullish(),
   action: FirewallActionSchema.default('accept'),
   log: z.boolean().default(false),
-  comment: z.string().max(256).optional(),
-  schedule: RuleScheduleSchema.optional(),
+  comment: z.string().max(256).nullish(),
+  schedule: RuleScheduleSchema.nullish(),
   ipv6: z.boolean().default(false),
 });
 
@@ -58,7 +58,7 @@ export const FirewallConfigSchema = z.object({
     z.object({
       interface: InterfaceNameSchema,
       zone: z.string().max(32),
-      role: z.string().optional(),
+      role: z.string().nullish(),
     })
   ),
 });

@@ -102,9 +102,9 @@ export const PaginationSchema = z.object({
 export const ApiResponseSchema = <T extends z.ZodType>(dataSchema: T) =>
   z.object({
     success: z.boolean(),
-    data: dataSchema.optional(),
-    error: z.string().optional(),
-    message: z.string().optional(),
+    data: dataSchema.nullish(),
+    error: z.string().nullish(),
+    message: z.string().nullish(),
   });
 
 // HTTP Method enum

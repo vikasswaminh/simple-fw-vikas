@@ -23,7 +23,7 @@ export const PortForwardRuleSchema = z.object({
 export const SnatRuleSchema = z.object({
   source_cidr: CidrSchema,
   to_address: IpAddressSchema,
-  out_interface: InterfaceNameSchema.optional(),
+  out_interface: InterfaceNameSchema.nullish(),
 });
 
 // NAT configuration

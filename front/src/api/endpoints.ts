@@ -58,9 +58,13 @@ import {
 /**
  * System API endpoints
  */
+export interface ServiceStatus { unit: string; active: boolean }
+export type ServicesMap = Record<string, ServiceStatus>;
+
 export const systemApi = {
   getInfo: () => api.get<SystemInfo>('/api/system/info', SystemInfoSchema),
   getTraffic: () => api.get<TrafficSnapshot>('/api/system/traffic', TrafficSnapshotSchema),
+  getServices: () => api.get<ServicesMap>('/api/services'),
   getSettings: () => api.get<SystemSettings>('/api/settings'),
   saveSettings: (settings: SystemSettings) => api.post('/api/settings', settings),
   reboot: (password: string) => api.post('/api/system/reboot', { confirm_password: password }),

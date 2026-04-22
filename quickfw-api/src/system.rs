@@ -173,6 +173,7 @@ pub async fn create_router() -> Router {
         .route("/api/system/info", get(get_system_info))
         .route("/api/system/traffic", get(get_traffic_snapshot))
         .route("/api/system/reboot", post(reboot_system))
+        .route("/api/services", get(get_services))
         .route("/api/health", get(health_check)) // health endpoint
         .route("/api/interfaces", get(get_interfaces))
         .route("/api/interfaces/config", post(set_interface_config))
@@ -196,6 +197,34 @@ pub async fn create_router() -> Router {
 async fn health_check() -> impl axum::response::IntoResponse {
     // Could add deeper checks (e.g., connectivity to nft, DB) later.
     (axum::http::StatusCode::OK, "OK")
+}
+
+/// Query systemd for the live status of core appliance services.
+/// The Dashboard's Services panel was previously hard-coded to "running"
+/// for every service regardless of reality. This endpoint asks
+/// `systemctl is-active` for each one so the panel shows truth.
+async fn get_services() -> Json<serde_json::Value> {
+    // (label shown in UI, systemd unit name)
+    let services: &[(&str, &str)] = &[
+        ("dns",    "dnsmasq"),
+        ("dhcp",   "dnsmasq"),
+        ("ntp",    "systemd-timesyncd"),
+        ("ssh",    "ssh"),
+        ("syslog", "rsyslog"),
+    ];
+    let mut out = serde_json::Map::new();
+    for (label, unit) in services {
+        let active = Command::new("systemctl")
+            .args(["is-active", unit])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        out.insert(
+            (*label).to_string(),
+            serde_json::json!({ "unit": unit, "active": active }),
+        );
+    }
+    Json(serde_json::Value::Object(out))
 }
 
 // ===================================================================
