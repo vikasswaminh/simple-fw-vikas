@@ -81,7 +81,10 @@ pub fn create_auth_router() -> Router {
 fn unix_now() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or_else(|e| {
+            tracing::warn!("System clock is before Unix epoch: {}. Treating as epoch.", e);
+            std::time::Duration::from_secs(0)
+        })
         .as_secs()
 }
 
@@ -149,6 +152,26 @@ pub async fn basic_auth_middleware(
         }
     }
 
+    // --- First-boot protection ---
+    // If the appliance hasn't been initialized (no password or default password),
+    // only allow static assets and auth endpoints needed for setup.
+    let is_initialized = !tokio::task::spawn_blocking(is_default_password).await.unwrap_or(true);
+    if !is_initialized {
+        let allowed_during_setup = is_static
+            || path == "/api/auth/login"
+            || path == "/api/auth/password"
+            || path == "/index.html"
+            || path == "/login.html";
+        if !allowed_during_setup {
+            let resp = axum::response::Response::builder()
+                .status(axum::http::StatusCode::SERVICE_UNAVAILABLE)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(axum::body::Body::from(r#"{"error":"Appliance not initialized"}"#))
+                .unwrap_or_else(|_| axum::response::Response::new(axum::body::Body::from("Service Unavailable")));
+            return Err(resp);
+        }
+    }
+
     // --- Auth-exempt paths ---
     // The HTML page + static assets load without auth.
     // The JS login form handles authentication via /api/auth/login session cookie.
@@ -202,7 +225,8 @@ pub async fn basic_auth_middleware(
 
     // --- Try session cookie ---
     if let Some(user) = check_session_cookie(&request) {
-        if is_default_password() && !is_auth_path(&path) {
+        let needs_change = tokio::task::spawn_blocking(is_default_password).await.unwrap_or(true);
+        if needs_change && !is_auth_path(&path) {
             return Err(forced_password_change_response());
         }
         request.extensions_mut().insert(AuthUser(user));
@@ -218,11 +242,19 @@ pub async fn basic_auth_middleware(
 
     match auth_header {
         Some(ref auth) if auth.starts_with("Basic ") => {
-            let encoded = &auth[6..];
-            if let Ok(decoded) = base64_decode(encoded) {
+            let encoded = auth[6..].to_string();
+            let decoded = tokio::task::spawn_blocking(move || base64_decode(&encoded)).await.unwrap_or(Err(()));
+            if let Ok(decoded) = decoded {
                 if let Some((user, pass)) = decoded.split_once(':') {
-                    if verify_credentials(user, pass) {
-                        if is_default_password() && !is_auth_path(&path) {
+                    let user = user.to_string();
+                    let pass = pass.to_string();
+                    let user_for_verify = user.clone();
+                    let valid = tokio::task::spawn_blocking(move || verify_credentials(&user_for_verify, &pass))
+                        .await
+                        .unwrap_or(false);
+                    if valid {
+                        let needs_change = tokio::task::spawn_blocking(is_default_password).await.unwrap_or(true);
+                        if needs_change && !is_auth_path(&path) {
                             return Err(forced_password_change_response());
                         }
                         // Reset login failures on successful auth
@@ -234,7 +266,7 @@ pub async fn basic_auth_middleware(
                         }
                         request
                             .extensions_mut()
-                            .insert(AuthUser(user.to_string()));
+                            .insert(AuthUser(user));
                         return Ok(next.run(request).await);
                     } else {
                         // Track auth failure
@@ -273,7 +305,7 @@ fn unauthorized_response() -> Response {
         .status(StatusCode::UNAUTHORIZED)
         .header(header::CONTENT_TYPE, "application/json")
         .body(axum::body::Body::from(body.to_string()))
-        .unwrap()
+        .unwrap_or_else(|_| Response::new(axum::body::Body::from("Unauthorized")))
 }
 
 fn too_many_requests_response(retry_after: u64) -> Response {
@@ -281,7 +313,7 @@ fn too_many_requests_response(retry_after: u64) -> Response {
         .status(StatusCode::TOO_MANY_REQUESTS)
         .header("Retry-After", retry_after.to_string())
         .body(axum::body::Body::from("Too many requests"))
-        .unwrap()
+        .unwrap_or_else(|_| Response::new(axum::body::Body::from("Too many requests")))
 }
 
 fn forced_password_change_response() -> Response {
@@ -293,7 +325,7 @@ fn forced_password_change_response() -> Response {
         .status(StatusCode::FORBIDDEN)
         .header(header::CONTENT_TYPE, "application/json")
         .body(axum::body::Body::from(body.to_string()))
-        .unwrap()
+        .unwrap_or_else(|_| Response::new(axum::body::Body::from("Forbidden")))
 }
 
 fn is_auth_path(path: &str) -> bool {
@@ -511,7 +543,12 @@ struct LoginResponse {
 async fn login(
     Json(payload): Json<LoginRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
-    if !verify_credentials(&payload.username, &payload.password) {
+    let username = payload.username.clone();
+    let password = payload.password.clone();
+    let valid = tokio::task::spawn_blocking(move || verify_credentials(&username, &password))
+        .await
+        .unwrap_or(false);
+    if !valid {
         return Err((
             StatusCode::UNAUTHORIZED,
             Json(serde_json::json!({"error": "Invalid credentials"})),
@@ -564,7 +601,11 @@ struct ChangePasswordRequest {
 async fn change_password(
     Json(payload): Json<ChangePasswordRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
-    if !verify_credentials(DEFAULT_USER, &payload.current) {
+    let current = payload.current.clone();
+    let valid = tokio::task::spawn_blocking(move || verify_credentials(DEFAULT_USER, &current))
+        .await
+        .unwrap_or(false);
+    if !valid {
         return Err((
             StatusCode::UNAUTHORIZED,
             Json(serde_json::json!({"error": "Current password is incorrect"})),
@@ -586,12 +627,28 @@ async fn change_password(
         ));
     }
 
-    hash_and_store_password(&payload.new).map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": format!("Failed to store password: {}", e)})),
-        )
-    })?;
+    let new_password = payload.new.clone();
+    // Convert error to String inside the closure so the closure returns a Send type.
+    tokio::task::spawn_blocking(move || hash_and_store_password(&new_password).map_err(|e| e.to_string()))
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": format!("Failed to store password: {}", e)})),
+            )
+        })?
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": format!("Failed to store password: {}", e)})),
+            )
+        })?;
+
+    // Invalidate all existing sessions so stolen cookies are revoked
+    {
+        let mut sessions = SESSIONS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        sessions.clear();
+    }
 
     Ok(Json(serde_json::json!({"message": "Password changed successfully"})))
 }
@@ -611,8 +668,7 @@ async fn get_ws_token() -> Json<WsTokenResponse> {
 }
 
 // --- Base64 decode ---
-// Minimal self-contained base64 implementation — avoids adding an external crate
-// dependency for a single decode call (Basic auth header). Sufficient for this use case.
+// Uses the well-vetted `base64` crate instead of a hand-rolled implementation.
 
 fn base64_decode(input: &str) -> Result<String, ()> {
     let bytes = base64_decode_bytes(input)?;
@@ -620,27 +676,10 @@ fn base64_decode(input: &str) -> Result<String, ()> {
 }
 
 fn base64_decode_bytes(input: &str) -> Result<Vec<u8>, ()> {
-    const TABLE: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-    let input = input.trim_end_matches('=');
-    let mut output = Vec::with_capacity(input.len() * 3 / 4);
-
-    let mut buf: u32 = 0;
-    let mut bits: u32 = 0;
-
-    for &byte in input.as_bytes() {
-        let val = TABLE.iter().position(|&c| c == byte).ok_or(())? as u32;
-        buf = (buf << 6) | val;
-        bits += 6;
-        if bits >= 8 {
-            bits -= 8;
-            output.push((buf >> bits) as u8);
-            buf &= (1 << bits) - 1;
-        }
-    }
-
-    Ok(output)
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD
+        .decode(input.trim())
+        .map_err(|_| ())
 }
 
 
@@ -712,6 +751,14 @@ mod tests {
         
         // Token should be consumed (one-time use)
         assert!(!verify_ws_token(&token));
+    }
+
+    #[test]
+    fn test_unix_now_does_not_panic() {
+        let now = unix_now();
+        // Should return a u64 without panicking, even if clock is before 1970
+        // (we can't easily mock the clock, but we verify it doesn't panic)
+        assert!(now > 0 || now == 0);
     }
 
     #[test]

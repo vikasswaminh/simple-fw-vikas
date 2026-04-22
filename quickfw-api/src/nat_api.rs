@@ -10,7 +10,7 @@ use axum::{
 use gfw_io::nat::NatConfig;
 use tracing::{error, info, warn};
 
-use crate::validation;
+use crate::{state, validation};
 
 const NAT_CONFIG_PATH: &str = "/etc/quickfw/nat.yaml";
 
@@ -23,6 +23,7 @@ pub async fn create_router() -> Router {
 }
 
 async fn get_nat_config() -> Json<NatConfig> {
+    let _guard = state::config_lock().lock().await;
     let config = load_nat_config().unwrap_or_default();
     Json(config)
 }
@@ -30,6 +31,7 @@ async fn get_nat_config() -> Json<NatConfig> {
 async fn save_nat_config(
     Json(config): Json<NatConfig>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+    let _guard = state::config_lock().lock().await;
     // Validate all user-supplied fields before touching nftables
     if let Err(e) = validation::validate_nat_config(&config) {
         warn!("NAT config validation failed: {}", e);
@@ -39,10 +41,19 @@ async fn save_nat_config(
         ));
     }
 
+    // Apply rules first; only save config if apply succeeds
+    gfw_io::nat::apply_nat(&config).map_err(|e| {
+        error!("Failed to apply NAT rules: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Apply failed: {}", e)})),
+        )
+    })?;
+
     // Backup before save
     let _ = crate::config_utils::backup_config(NAT_CONFIG_PATH);
 
-    // Save to file
+    // Atomic save
     let yaml = serde_yaml::to_string(&config).map_err(|e| {
         error!("Failed to serialize NAT config: {}", e);
         (
@@ -51,20 +62,11 @@ async fn save_nat_config(
         )
     })?;
 
-    std::fs::write(NAT_CONFIG_PATH, &yaml).map_err(|e| {
+    crate::config_utils::atomic_write(NAT_CONFIG_PATH, &yaml).map_err(|e| {
         error!("Failed to write NAT config: {}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({"error": format!("Write failed: {}", e)})),
-        )
-    })?;
-
-    // Apply rules
-    gfw_io::nat::apply_nat(&config).map_err(|e| {
-        error!("Failed to apply NAT rules: {}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": format!("Apply failed: {}", e)})),
         )
     })?;
 
@@ -81,6 +83,7 @@ fn load_nat_config() -> Result<NatConfig, Box<dyn std::error::Error>> {
 async fn delete_masquerade(
     Path(idx): Path<usize>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+    let _guard = state::config_lock().lock().await;
     let mut config = load_nat_config().unwrap_or_default();
 
     if idx == 0 || idx > config.masquerade.len() {
@@ -124,6 +127,7 @@ async fn delete_masquerade(
 async fn delete_port_forward(
     Path(idx): Path<usize>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+    let _guard = state::config_lock().lock().await;
     let mut config = load_nat_config().unwrap_or_default();
 
     if idx == 0 || idx > config.port_forward.len() {

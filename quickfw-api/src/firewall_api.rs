@@ -10,7 +10,7 @@ use gfw_io::firewall::{self, FirewallConfig};
 use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
 
-use crate::validation;
+use crate::{state, validation};
 
 const GROUPS_PATH: &str = "/etc/quickfw/firewall-groups.yaml";
 
@@ -45,14 +45,25 @@ pub async fn create_router() -> Router {
         .route("/api/firewall/counters", get(get_firewall_counters))
 }
 
-async fn get_firewall_config() -> Json<FirewallConfig> {
-    Json(firewall::load_firewall_config())
+async fn get_firewall_config() -> Result<Json<FirewallConfig>, (StatusCode, Json<serde_json::Value>)> {
+    let _guard = state::config_lock().lock().await;
+    match firewall::load_firewall_config() {
+        Ok(config) => Ok(Json(config)),
+        Err(e) => {
+            error!("Failed to load firewall config: {}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to load firewall config"})),
+            ))
+        }
+    }
 }
 
 async fn save_firewall_config(
     query: axum::extract::Query<std::collections::HashMap<String, String>>,
     Json(config): Json<FirewallConfig>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+    let _guard = state::config_lock().lock().await;
     // Validate all user-supplied fields before touching nftables
     if let Err(e) = validation::validate_firewall_config(&config) {
         warn!("Firewall config validation failed: {}", e);
@@ -100,6 +111,7 @@ async fn save_firewall_config(
 }
 
 async fn get_groups() -> Json<FirewallGroups> {
+    let _guard = state::config_lock().lock().await;
     let groups: FirewallGroups = match std::fs::read_to_string(GROUPS_PATH) {
         Ok(c) => serde_yaml::from_str(&c).unwrap_or_default(),
         Err(_) => FirewallGroups::default(),
@@ -110,6 +122,7 @@ async fn get_groups() -> Json<FirewallGroups> {
 async fn save_groups(
     Json(groups): Json<FirewallGroups>,
 ) -> Result<Json<&'static str>, StatusCode> {
+    let _guard = state::config_lock().lock().await;
     // Validate group addresses and ports
     for group in &groups.address_groups {
         if let Err(e) = validation::validate_rule_name(&group.name) {

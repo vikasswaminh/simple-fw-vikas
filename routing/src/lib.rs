@@ -8,6 +8,7 @@ pub mod bgp;
 pub mod rip;
 
 use serde::{Deserialize, Serialize};
+use std::io::Write;
 
 /// Static route entry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,10 +50,24 @@ pub fn load_static_routes() -> StaticRoutesConfig {
     }
 }
 
-/// Save static routes to disk.
+/// Atomic write helper: write to .tmp, fsync, rename.
+fn atomic_write(path: &str, content: &str) -> std::io::Result<()> {
+    let tmp_path = format!("{}.tmp", path);
+    let mut file = std::fs::File::create(&tmp_path)?;
+    file.write_all(content.as_bytes())?;
+    file.sync_all()?;
+    std::fs::rename(&tmp_path, path)?;
+    if let Some(parent) = std::path::Path::new(path).parent() {
+        let dir = std::fs::File::open(parent)?;
+        dir.sync_all()?;
+    }
+    Ok(())
+}
+
+/// Save static routes to disk atomically.
 pub fn save_static_routes(config: &StaticRoutesConfig) -> Result<(), Box<dyn std::error::Error>> {
     let yaml = serde_yaml::to_string(config)?;
-    std::fs::write(ROUTES_CONFIG_PATH, &yaml)?;
+    atomic_write(ROUTES_CONFIG_PATH, &yaml)?;
     Ok(())
 }
 
@@ -106,8 +121,8 @@ pub fn generate_frr_config(
 
 /// Apply FRR configuration by writing to /etc/frr/frr.conf and reloading.
 pub fn apply_frr_config(frr_conf: &str) -> Result<(), Box<dyn std::error::Error>> {
-    // Write config
-    std::fs::write("/etc/frr/frr.conf", frr_conf)?;
+    // Write config atomically
+    atomic_write("/etc/frr/frr.conf", frr_conf)?;
 
     // Set permissions
     let _ = std::process::Command::new("chown")

@@ -2,7 +2,7 @@ import { Component } from '@components/component';
 import { firewallApi } from '@api/endpoints';
 import { openModal, closeModal } from '@components/modal';
 import { showToast } from '@components/toast';
-import { formatBytes } from '@utils';
+import { formatBytes, escapeHtml } from '@utils';
 import type { FirewallRule, FirewallConfig, FirewallGroups, RuleCounter, AddressGroup, PortGroup } from '@schemas';
 
 export class FirewallPage extends Component<{
@@ -148,7 +148,7 @@ export class FirewallPage extends Component<{
               <thead><tr><th>Name</th><th>Addresses</th></tr></thead>
               <tbody>
                 ${groups.address_groups?.length ? groups.address_groups.map((g: AddressGroup) => `
-                  <tr><td><strong>${g.name}</strong></td><td class="mono">${g.addresses.join(', ')}</td></tr>
+                  <tr><td><strong>${escapeHtml(g.name)}</strong></td><td class="mono">${g.addresses.map((a: string) => escapeHtml(a)).join(', ')}</td></tr>
                 `).join('') : '<tr><td colspan="2" style="color: var(--color-text-muted);">None</td></tr>'}
               </tbody>
             </table>
@@ -159,7 +159,7 @@ export class FirewallPage extends Component<{
               <thead><tr><th>Name</th><th>Ports</th></tr></thead>
               <tbody>
                 ${groups.port_groups?.length ? groups.port_groups.map((g: PortGroup) => `
-                  <tr><td><strong>${g.name}</strong></td><td class="mono">${g.ports.join(', ')}</td></tr>
+                  <tr><td><strong>${escapeHtml(g.name)}</strong></td><td class="mono">${g.ports.map((p: string) => escapeHtml(p)).join(', ')}</td></tr>
                 `).join('') : '<tr><td colspan="2" style="color: var(--color-text-muted);">None</td></tr>'}
               </tbody>
             </table>

@@ -2,6 +2,7 @@ import { Component } from '@components/component';
 import { routingApi, routesApi } from '@api/endpoints';
 import { openModal, closeModal } from '@components/modal';
 import { showToast } from '@components/toast';
+import { escapeHtml } from '@utils';
 import type { OspfConfig, OspfNetwork, BgpConfig, BgpNeighbor, StaticRoute, OspfNeighborStatus } from '@schemas';
 
 export class RoutingPage extends Component<{
@@ -144,7 +145,7 @@ export class RoutingPage extends Component<{
         <label class="toggle"><input type="checkbox" ${ospf.enabled ? 'checked' : ''} id="ospf-enabled"><span class="toggle-track"></span></label>
         <strong>OSPF Enabled</strong>
         <div class="form-group" style="margin: 0; margin-left: var(--spacing-lg);"><span class="form-label" style="display: inline;">Router ID</span>
-          <input type="text" class="form-input" value="${ospf.router_id || ''}" style="width: 160px; display: inline-block; margin-left: var(--spacing-sm);" placeholder="Auto">
+          <input type="text" class="form-input" value="${escapeHtml(ospf.router_id || '')}" style="width: 160px; display: inline-block; margin-left: var(--spacing-sm);" placeholder="Auto">
         </div>
       </div>
       <div class="table-container">
@@ -153,8 +154,8 @@ export class RoutingPage extends Component<{
           <tbody>
             ${ospf.networks?.map((n: OspfNetwork, i: number) => `
               <tr>
-                <td class="mono">${n.prefix}</td>
-                <td>${n.area}</td>
+                <td class="mono">${escapeHtml(n.prefix)}</td>
+                <td>${escapeHtml(String(n.area))}</td>
                 <td><span class="badge badge-outline badge-sm">Normal</span></td>
                 <td><div class="actions">
                   <button class="btn-icon" title="Edit">✎</button>
@@ -175,9 +176,9 @@ export class RoutingPage extends Component<{
             <tbody>
               ${ospfNeighbors.map((n: OspfNeighborStatus) => `
                 <tr>
-                  <td class="mono">${n.neighbor_id}</td><td class="mono">${n.ip_address}</td>
-                  <td><span class="badge ${n.state === 'FULL' ? 'badge-success' : 'badge-warning'} badge-sm">${n.state}</span></td>
-                  <td>${n.uptime}</td>
+                  <td class="mono">${escapeHtml(n.neighbor_id)}</td><td class="mono">${escapeHtml(n.ip_address)}</td>
+                  <td><span class="badge ${n.state === 'FULL' ? 'badge-success' : 'badge-warning'} badge-sm">${escapeHtml(n.state)}</span></td>
+                  <td>${escapeHtml(n.uptime)}</td>
                 </tr>
               `).join('')}
             </tbody>
@@ -194,7 +195,7 @@ export class RoutingPage extends Component<{
       <div style="display: flex; align-items: center; gap: var(--spacing-md); margin-bottom: var(--spacing-lg);">
         <label class="toggle"><input type="checkbox" ${bgp.enabled ? 'checked' : ''}><span class="toggle-track"></span></label>
         <strong>BGP Enabled</strong>
-        <span style="margin-left: var(--spacing-lg); color: var(--color-text-secondary);">AS ${bgp.local_as} | Router ID ${bgp.router_id}</span>
+        <span style="margin-left: var(--spacing-lg); color: var(--color-text-secondary);">AS ${escapeHtml(String(bgp.local_as))} | Router ID ${escapeHtml(bgp.router_id)}</span>
       </div>
       <div class="table-container">
         <table class="table">
@@ -202,7 +203,7 @@ export class RoutingPage extends Component<{
           <tbody>
             ${bgp.neighbors?.map((n: BgpNeighbor) => `
               <tr>
-                <td class="mono">${n.address}</td><td>${n.remote_as}</td><td>${n.description || '—'}</td>
+                <td class="mono">${escapeHtml(n.address)}</td><td>${escapeHtml(String(n.remote_as))}</td><td>${escapeHtml(n.description) || '—'}</td>
                 <td><div class="actions">
                   <button class="btn-icon" title="Edit">✎</button>
                   <button class="btn-icon danger" title="Delete">🗑</button>
@@ -216,7 +217,7 @@ export class RoutingPage extends Component<{
 
       ${this.state.bgpSummary ? `
         <h4 style="margin: var(--spacing-lg) 0 var(--spacing-sm);">Peer Summary</h4>
-        <div class="mono-output">${this.state.bgpSummary}</div>
+        <div class="mono-output">${escapeHtml(this.state.bgpSummary)}</div>
       ` : ''}
     `;
   }
@@ -230,8 +231,8 @@ export class RoutingPage extends Component<{
           <tbody>
             ${routes.map((r: StaticRoute) => `
               <tr>
-                <td class="mono">${r.destination}</td><td class="mono">${r.gateway}</td>
-                <td>${r.interface || '—'}</td><td>${r.metric}</td>
+                <td class="mono">${escapeHtml(r.destination)}</td><td class="mono">${escapeHtml(r.gateway)}</td>
+                <td>${escapeHtml(r.interface) || '—'}</td><td>${escapeHtml(String(r.metric))}</td>
                 <td><div class="actions">
                   <button class="btn-icon" title="Edit">✎</button>
                   <button class="btn-icon danger" title="Delete">🗑</button>
@@ -250,7 +251,7 @@ export class RoutingPage extends Component<{
       <p style="color: var(--color-text-secondary); margin-bottom: var(--spacing-md); font-size: var(--font-size-sm);">
         Kernel routing table from FRR/vtysh. Click Refresh to update.
       </p>
-      <div class="mono-output">${this.state.routingTable || 'Click Refresh to load routing table.'}</div>
+      <div class="mono-output">${escapeHtml(this.state.routingTable) || 'Click Refresh to load routing table.'}</div>
     `;
   }
 }

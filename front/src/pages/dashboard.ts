@@ -1,7 +1,7 @@
 import { Component } from '@components/component';
 import { store } from '@state/store';
 import { systemApi, conntrackApi, networkApi, auditApi, routesApi } from '@api/endpoints';
-import { formatBytes, formatUptime, formatTimeAgo } from '@utils';
+import { formatBytes, formatUptime, formatTimeAgo, escapeHtml } from '@utils';
 import type { SystemInfo, TrafficSnapshot, Interface, AuditEntry } from '@schemas';
 
 /**
@@ -244,7 +244,7 @@ export class DashboardPage extends Component<{
           ${auditEntries.length > 0 ? auditEntries.map((entry: AuditEntry) => `
             <div class="alert-row">
               <span class="alert-icon ${entry.status >= 400 ? 'danger' : 'info'}">${entry.status >= 400 ? '⚠' : 'ℹ'}</span>
-              <span class="alert-message">${entry.method} ${entry.endpoint} — ${entry.user}</span>
+              <span class="alert-message">${escapeHtml(entry.method)} ${escapeHtml(entry.endpoint)} — ${escapeHtml(entry.user)}</span>
               <span class="alert-time">${formatTimeAgo(entry.timestamp)}</span>
             </div>
           `).join('') : '<p style="color: var(--color-text-muted);">No recent alerts</p>'}

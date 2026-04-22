@@ -1,6 +1,12 @@
 /**
  * Reusable Modal Dialog Component
+ *
+ * SECURITY NOTE: options.body and options.footer are rendered as raw HTML.
+ * Callers MUST escape any user-controllable data before passing it into body/footer.
+ * options.title is escaped automatically.
  */
+
+import { escapeHtml } from '@utils';
 
 export interface ModalOptions {
   title: string;
@@ -30,7 +36,7 @@ export function openModal(options: ModalOptions): HTMLElement {
   overlay.innerHTML = `
     <div class="modal ${options.size === 'lg' ? 'modal-lg' : ''}">
       <div class="modal-header">
-        <h3 class="modal-title">${options.title}</h3>
+        <h3 class="modal-title">${escapeHtml(options.title)}</h3>
         <button class="btn-icon modal-close" aria-label="Close">✕</button>
       </div>
       <div class="modal-body">

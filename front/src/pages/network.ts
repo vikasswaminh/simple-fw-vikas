@@ -3,7 +3,7 @@ import { networkApi, toolsApi } from '@api/endpoints';
 import { openModal, closeModal } from '@components/modal';
 import { showToast } from '@components/toast';
 import type { Interface, ArpEntry, DhcpLease, DnsLocalEntry } from '@schemas';
-import { formatBytes } from '@utils';
+import { formatBytes, escapeHtml } from '@utils';
 
 export class NetworkPage extends Component<{
   interfaces: Interface[];
@@ -71,7 +71,7 @@ export class NetworkPage extends Component<{
           <div id="dns-entries">
             ${entries.map((e: DnsLocalEntry, i: number) => `
               <div class="kv-row" data-dns-idx="${i}">
-                <span>${e.hostname} → ${e.ip}</span>
+                <span>${escapeHtml(e.hostname)} → ${escapeHtml(e.ip)}</span>
                 <button class="btn-icon danger" data-delete-dns="${i}">✕</button>
               </div>
             `).join('') || '<p style="color: var(--color-text-muted);">No entries</p>'}
@@ -204,10 +204,10 @@ export class NetworkPage extends Component<{
           <tbody>
             ${leases.length > 0 ? leases.map((l: DhcpLease) => `
               <tr>
-                <td class="mono">${l.mac}</td>
-                <td class="mono">${l.ip}</td>
-                <td>${l.hostname || '—'}</td>
-                <td>${l.expires}</td>
+                <td class="mono">${escapeHtml(l.mac)}</td>
+                <td class="mono">${escapeHtml(l.ip)}</td>
+                <td>${escapeHtml(l.hostname) || '—'}</td>
+                <td>${escapeHtml(l.expires)}</td>
                 <td><span class="badge badge-success badge-sm">active</span></td>
               </tr>
             `).join('') : '<tr><td colspan="5" style="color: var(--color-text-muted);">No DHCP leases. Click Refresh to load.</td></tr>'}
@@ -230,9 +230,9 @@ export class NetworkPage extends Component<{
           <tbody>
             ${entries.length > 0 ? entries.map((e: ArpEntry) => `
               <tr>
-                <td class="mono">${e.ip}</td>
-                <td class="mono">${e.mac}</td>
-                <td>${e.interface}</td>
+                <td class="mono">${escapeHtml(e.ip)}</td>
+                <td class="mono">${escapeHtml(e.mac)}</td>
+                <td>${escapeHtml(e.interface)}</td>
                 <td><span class="badge ${e.state === 'REACHABLE' ? 'badge-success' : e.state === 'STALE' ? 'badge-outline' : 'badge-warning'} badge-sm">${e.state}</span></td>
               </tr>
             `).join('') : '<tr><td colspan="4" style="color: var(--color-text-muted);">No ARP entries. Click Refresh to load.</td></tr>'}

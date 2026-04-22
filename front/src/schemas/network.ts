@@ -4,7 +4,6 @@ import {
   CidrSchema,
   IpAddressSchema,
   MacAddressSchema,
-  PortSchema,
 } from './common';
 
 /**

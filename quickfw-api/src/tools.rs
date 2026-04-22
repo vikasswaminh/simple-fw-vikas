@@ -16,6 +16,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use std::process::Command;
+use crate::state;
 use tracing::{error, info};
 
 const DNS_LOCAL_PATH: &str = "/etc/dnsmasq.d/quickfw-local.conf";
@@ -154,6 +155,7 @@ struct DnsLocalEntry {
 }
 
 async fn get_dns_local() -> Json<Vec<DnsLocalEntry>> {
+    let _guard = state::config_lock().lock().await;
     let content = std::fs::read_to_string(DNS_LOCAL_PATH).unwrap_or_default();
 
     let entries: Vec<DnsLocalEntry> = content
@@ -179,6 +181,7 @@ async fn get_dns_local() -> Json<Vec<DnsLocalEntry>> {
 async fn save_dns_local(
     Json(entries): Json<Vec<DnsLocalEntry>>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let _guard = state::config_lock().lock().await;
     // Validate entries
     for entry in &entries {
         if entry.hostname.is_empty() || entry.hostname.len() > 253 {

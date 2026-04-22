@@ -7,10 +7,12 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::process::Command;
+use crate::state;
 use tracing::{error, info};
 
 // ===================================================================
@@ -141,6 +143,12 @@ struct ConfigExport {
     nat: serde_json::Value,
     roles: serde_json::Value,
     routes: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tls_cert: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tls_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    admin_password: Option<String>,
 }
 
 // ===================================================================
@@ -293,6 +301,7 @@ async fn reboot_system(
 // ===================================================================
 
 async fn get_interfaces() -> Json<InterfaceResponse> {
+    let _guard = state::config_lock().lock().await;
     let roles_config = load_roles();
     let descriptions = load_descriptions();
     let mut interfaces = Vec::new();
@@ -390,6 +399,7 @@ fn is_valid_timezone(s: &str) -> bool {
 async fn set_interface_config(
     Json(req): Json<InterfaceConfigRequest>,
 ) -> Result<Json<&'static str>, StatusCode> {
+    let _guard = state::config_lock().lock().await;
     let iface = &req.name;
 
     // Validate interface name (alphanumeric, dot, dash, underscore only)
@@ -549,12 +559,14 @@ async fn set_interface_config_by_path(
 }
 
 async fn get_interface_roles() -> Json<InterfaceRolesConfig> {
+    let _guard = state::config_lock().lock().await;
     Json(load_roles())
 }
 
 async fn save_interface_roles(
     Json(config): Json<InterfaceRolesConfig>,
 ) -> Result<Json<&'static str>, StatusCode> {
+    let _guard = state::config_lock().lock().await;
     let yaml = serde_yaml::to_string(&config).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     fs::write(ROLES_PATH, &yaml).map_err(|e| {
         error!("Failed to write interface roles: {}", e);
@@ -568,6 +580,7 @@ async fn save_interface_roles(
 // ===================================================================
 
 async fn get_routes() -> Json<RoutesConfig> {
+    let _guard = state::config_lock().lock().await;
     let config: RoutesConfig = match fs::read_to_string(ROUTES_PATH) {
         Ok(contents) => serde_yaml::from_str(&contents).unwrap_or_default(),
         Err(_) => RoutesConfig::default(),
@@ -578,6 +591,7 @@ async fn get_routes() -> Json<RoutesConfig> {
 async fn save_routes(
     Json(config): Json<RoutesConfig>,
 ) -> Result<Json<&'static str>, StatusCode> {
+    let _guard = state::config_lock().lock().await;
     // Validate all routes before saving
     for route in &config.routes {
         if !route.destination.is_empty() && !is_valid_cidr(&route.destination) && !is_valid_ip(&route.destination) {
@@ -624,6 +638,7 @@ async fn save_routes(
 // ===================================================================
 
 async fn get_settings() -> Json<ApplianceSettings> {
+    let _guard = state::config_lock().lock().await;
     let config: ApplianceSettings = match fs::read_to_string(SETTINGS_PATH) {
         Ok(contents) => serde_yaml::from_str(&contents).unwrap_or_else(|_| default_settings()),
         Err(_) => default_settings(),
@@ -634,6 +649,7 @@ async fn get_settings() -> Json<ApplianceSettings> {
 async fn save_settings(
     Json(config): Json<ApplianceSettings>,
 ) -> Result<Json<&'static str>, StatusCode> {
+    let _guard = state::config_lock().lock().await;
     // Validate hostname
     if !config.hostname.is_empty() {
         if !is_valid_hostname(&config.hostname) {
@@ -699,6 +715,7 @@ async fn save_settings(
 // ===================================================================
 
 async fn export_config() -> Json<ConfigExport> {
+    let _guard = state::config_lock().lock().await;
     let read_yaml_json = |path: &str| -> serde_json::Value {
         fs::read_to_string(path)
             .ok()
@@ -713,6 +730,10 @@ async fn export_config() -> Json<ConfigExport> {
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
         .unwrap_or_default();
 
+    let read_file_b64 = |path: &str| -> Option<String> {
+        fs::read(path).ok().map(|bytes| base64::engine::general_purpose::STANDARD.encode(&bytes))
+    };
+
     Json(ConfigExport {
         exported_at: now,
         settings: read_yaml_json(SETTINGS_PATH),
@@ -720,6 +741,9 @@ async fn export_config() -> Json<ConfigExport> {
         nat: read_yaml_json(NAT_PATH),
         roles: read_yaml_json(ROLES_PATH),
         routes: read_yaml_json(ROUTES_PATH),
+        tls_cert: read_file_b64("/etc/quickfw/tls.crt"),
+        tls_key: read_file_b64("/etc/quickfw/tls.key"),
+        admin_password: fs::read_to_string("/etc/quickfw/admin.password").ok(),
     })
 }
 
@@ -825,6 +849,7 @@ struct RestoreRequest {
 async fn restore_config_backup(
     Json(req): Json<RestoreRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let _guard = state::config_lock().lock().await;
     // Re-auth required
     if !crate::auth::verify_password(&req.confirm_password) {
         return Err((
@@ -911,6 +936,12 @@ struct ConfigImport {
     roles: Option<serde_json::Value>,
     #[serde(default)]
     routes: Option<serde_json::Value>,
+    #[serde(default)]
+    tls_cert: Option<String>,
+    #[serde(default)]
+    tls_key: Option<String>,
+    #[serde(default)]
+    admin_password: Option<String>,
 }
 
 /// Config import transaction - validates all sections before writing any files
@@ -925,6 +956,7 @@ struct ConfigTransaction {
 async fn import_config(
     Json(config): Json<ConfigImport>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let _guard = state::config_lock().lock().await;
     let mut imported = Vec::new();
     let mut transaction = ConfigTransaction {
         firewall: None,
@@ -1056,6 +1088,27 @@ async fn import_config(
                 Json(serde_json::json!({"error": format!("Write routes: {}", e)})),
             )
         })?;
+    }
+
+    // Import TLS cert, key, and admin password if present
+    if let Some(ref cert_b64) = config.tls_cert {
+        if let Ok(cert_bytes) = base64::engine::general_purpose::STANDARD.decode(cert_b64.trim()) {
+            let _ = crate::config_utils::backup_config("/etc/quickfw/tls.crt");
+            let _ = crate::config_utils::atomic_write("/etc/quickfw/tls.crt", &String::from_utf8_lossy(&cert_bytes));
+            imported.push("tls.crt");
+        }
+    }
+    if let Some(ref key_b64) = config.tls_key {
+        if let Ok(key_bytes) = base64::engine::general_purpose::STANDARD.decode(key_b64.trim()) {
+            let _ = crate::config_utils::backup_config("/etc/quickfw/tls.key");
+            let _ = crate::config_utils::atomic_write("/etc/quickfw/tls.key", &String::from_utf8_lossy(&key_bytes));
+            imported.push("tls.key");
+        }
+    }
+    if let Some(ref password) = config.admin_password {
+        let _ = crate::config_utils::backup_config("/etc/quickfw/admin.password");
+        let _ = crate::config_utils::atomic_write("/etc/quickfw/admin.password", password);
+        imported.push("admin.password");
     }
 
     info!("Config imported: {:?}", imported);
@@ -1247,6 +1300,7 @@ fn default_syslog_facility() -> String {
 }
 
 async fn get_syslog_config() -> Json<SyslogConfig> {
+    let _guard = state::config_lock().lock().await;
     let config: SyslogConfig = fs::read_to_string(SYSLOG_CONFIG_PATH)
         .ok()
         .and_then(|s| serde_yaml::from_str(&s).ok())
@@ -1257,6 +1311,7 @@ async fn get_syslog_config() -> Json<SyslogConfig> {
 async fn save_syslog_config(
     Json(config): Json<SyslogConfig>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let _guard = state::config_lock().lock().await;
     // Validate server address
     if config.enabled && config.server.is_empty() {
         return Err((

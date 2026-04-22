@@ -14,8 +14,67 @@ pub async fn create_router() -> Router {
         .route("/index.html", get(serve_index))
         .route("/login.html", get(serve_login))
         .route("/fonts/:filename", get(serve_font))
+        .route("/assets/:filename", get(serve_asset))
         .route("/:filename", get(serve_static_file))
         .fallback(serve_index) // SPA fallback for deep links
+}
+
+async fn serve_asset(
+    Path(filename): Path<String>,
+) -> Result<axum::response::Response<axum::body::Body>, axum::http::StatusCode> {
+    // Reuse the single-segment static handler for /assets/<filename> — the
+    // allow-list, extension guard, and path-traversal checks are identical.
+    // Vite emits hashed bundles under /assets/ so this route has to exist
+    // separately from the top-level one (axum won't match nested paths to
+    // a single-segment route).
+    serve_asset_file(&filename).await
+}
+
+async fn serve_asset_file(
+    filename: &str,
+) -> Result<axum::response::Response<axum::body::Body>, axum::http::StatusCode> {
+    if filename.contains("..") || filename.starts_with('.') {
+        return Err(axum::http::StatusCode::BAD_REQUEST);
+    }
+    if !filename
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
+    {
+        return Err(axum::http::StatusCode::BAD_REQUEST);
+    }
+    let content_type = if filename.ends_with(".css") {
+        "text/css"
+    } else if filename.ends_with(".js") {
+        "application/javascript"
+    } else if filename.ends_with(".html") {
+        "text/html"
+    } else if filename.ends_with(".svg") {
+        "image/svg+xml"
+    } else if filename.ends_with(".ico") {
+        "image/x-icon"
+    } else if filename.ends_with(".woff2") {
+        "font/woff2"
+    } else if filename.ends_with(".woff") {
+        "font/woff"
+    } else if filename.ends_with(".ttf") {
+        "font/ttf"
+    } else if filename.ends_with(".json") {
+        "application/json"
+    } else if filename.ends_with(".map") {
+        "application/json"
+    } else {
+        return Err(axum::http::StatusCode::NOT_FOUND);
+    };
+    let path = format!("{}/assets/{}", *STATIC_FILES_PATH, filename);
+    match fs::read(&path).await {
+        Ok(bytes) => axum::response::Response::builder()
+            .header("Content-Type", content_type)
+            // Vite emits content-hashed filenames, so we can cache forever.
+            .header("Cache-Control", "public, max-age=31536000, immutable")
+            .body(axum::body::Body::from(bytes))
+            .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR),
+        Err(_) => Err(axum::http::StatusCode::NOT_FOUND),
+    }
 }
 
 async fn serve_index() -> axum::response::Html<String> {
@@ -67,11 +126,11 @@ async fn serve_static_file(
     };
     let path = format!("{}/{}", *STATIC_FILES_PATH, filename);
     match fs::read(&path).await {
-        Ok(bytes) => Ok(axum::response::Response::builder()
+        Ok(bytes) => axum::response::Response::builder()
             .header("Content-Type", content_type)
             .header("Cache-Control", "no-cache, must-revalidate")
             .body(axum::body::Body::from(bytes))
-            .unwrap()),
+            .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR),
         Err(_) => Err(axum::http::StatusCode::NOT_FOUND),
     }
 }
@@ -101,11 +160,11 @@ async fn serve_font(
             } else {
                 "application/octet-stream"
             };
-            Ok(axum::response::Response::builder()
+            axum::response::Response::builder()
                 .header("Content-Type", content_type)
                 .header("Cache-Control", "public, max-age=31536000, immutable")
                 .body(axum::body::Body::from(bytes))
-                .unwrap())
+                .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)
         }
         Err(_) => Err(axum::http::StatusCode::NOT_FOUND),
     }

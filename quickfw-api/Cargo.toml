@@ -28,3 +28,4 @@ tokio-util = { version = "0.7.13", features = ["rt"] }
 tokio-stream = "0.1"
 routing = { path = "../routing" }
 subtle = "2.6"
+base64 = "0.22"

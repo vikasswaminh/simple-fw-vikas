@@ -234,7 +234,12 @@ async fn main() {
                     .status(axum::http::StatusCode::MOVED_PERMANENTLY)
                     .header(header::LOCATION, redirect_url)
                     .body(axum::body::Body::empty())
-                    .unwrap()
+                    .unwrap_or_else(|_| {
+                        axum::response::Response::builder()
+                            .status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)
+                            .body(axum::body::Body::from("Internal Server Error"))
+                            .unwrap()
+                    })
             });
 
             // Spawn HTTP redirect server

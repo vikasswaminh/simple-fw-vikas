@@ -1,5 +1,6 @@
 import { Component } from '@components/component';
 import { toolsApi, conntrackApi } from '@api/endpoints';
+import { escapeHtml } from '@utils';
 import type { ConntrackEntry } from '@schemas';
 
 export class ToolsPage extends Component<{
@@ -42,7 +43,7 @@ export class ToolsPage extends Component<{
             <div class="form-group" style="width: 70px; margin: 0;"><input type="number" name="count" class="form-input" value="4" min="1" max="20"></div>
             <button type="submit" class="btn btn-primary" ${loading ? 'disabled' : ''}>▷ Run</button>
           </form>
-          ${pingResult ? `<div class="mono-output">${pingResult}</div>` : ''}
+          ${pingResult ? `<div class="mono-output">${escapeHtml(pingResult)}</div>` : ''}
         ` : ''}
 
         ${activeTab === 'traceroute' ? `
@@ -50,7 +51,7 @@ export class ToolsPage extends Component<{
             <div class="form-group" style="flex: 1; margin: 0;"><input type="text" name="host" class="form-input" placeholder="8.8.8.8" required></div>
             <button type="submit" class="btn btn-primary" ${loading ? 'disabled' : ''}>▷ Run</button>
           </form>
-          ${tracerouteResult ? `<div class="mono-output">${tracerouteResult}</div>` : ''}
+          ${tracerouteResult ? `<div class="mono-output">${escapeHtml(tracerouteResult)}</div>` : ''}
         ` : ''}
 
         ${activeTab === 'wol' ? `
@@ -75,10 +76,10 @@ export class ToolsPage extends Component<{
               <tbody>
                 ${conntrack.slice(0, 100).map((e: ConntrackEntry) => `
                   <tr>
-                    <td>${e.protocol}</td>
-                    <td class="mono">${e.src}${e.sport ? ':' + e.sport : ''}</td>
-                    <td class="mono">${e.dst}${e.dport ? ':' + e.dport : ''}</td>
-                    <td><span class="badge badge-outline badge-sm">${e.state}</span></td>
+                    <td>${escapeHtml(e.protocol)}</td>
+                    <td class="mono">${escapeHtml(e.src)}${e.sport ? ':' + escapeHtml(e.sport) : ''}</td>
+                    <td class="mono">${escapeHtml(e.dst)}${e.dport ? ':' + escapeHtml(e.dport) : ''}</td>
+                    <td><span class="badge badge-outline badge-sm">${escapeHtml(e.state)}</span></td>
                   </tr>
                 `).join('') || '<tr><td colspan="4" style="color: var(--color-text-muted);">No connections</td></tr>'}
               </tbody>

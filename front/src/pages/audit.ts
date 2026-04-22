@@ -1,7 +1,7 @@
 import { Component } from '@components/component';
 import { auditApi } from '@api/endpoints';
 import type { AuditEntry } from '@schemas';
-import { formatTime } from '@utils';
+import { formatTime, escapeHtml } from '@utils';
 
 export class AuditPage extends Component<{
   entries: AuditEntry[];
@@ -107,7 +107,7 @@ export class AuditPage extends Component<{
           </select>
           <select class="form-select" id="filter-user" style="width: 140px;">
             <option value="">All Users</option>
-            ${users.map(u => `<option value="${u}">${u}</option>`).join('')}
+            ${users.map(u => `<option value="${escapeHtml(u)}">${escapeHtml(u)}</option>`).join('')}
           </select>
           <select class="form-select" id="filter-status" style="width: 130px;">
             <option value="" ${!filterStatus ? 'selected' : ''}>All Status</option>
@@ -129,9 +129,9 @@ export class AuditPage extends Component<{
                 <tr>
                   <td style="white-space: nowrap;">${formatTime(e.timestamp)}</td>
                   <td><span class="badge ${this.methodBadge(e.method)} badge-sm">${e.method}</span></td>
-                  <td class="mono">${e.endpoint}</td>
-                  <td>${e.user}</td>
-                  <td class="mono">${e.source_ip}</td>
+                  <td class="mono">${escapeHtml(e.endpoint)}</td>
+                  <td>${escapeHtml(e.user)}</td>
+                  <td class="mono">${escapeHtml(e.source_ip)}</td>
                   <td><span class="badge ${e.status < 300 ? 'badge-success' : e.status < 500 ? 'badge-warning' : 'badge-danger'} badge-sm">${e.status}</span></td>
                 </tr>
               `).join('') || '<tr><td colspan="6" style="color: var(--color-text-muted);">No entries</td></tr>'}

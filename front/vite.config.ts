@@ -30,6 +30,7 @@ export default defineConfig({
       '@utils': resolve(__dirname, './src/utils'),
       '@api': resolve(__dirname, './src/api'),
       '@router': resolve(__dirname, './src/router'),
+      '@state': resolve(__dirname, './src/state'),
     },
   },
   server: {

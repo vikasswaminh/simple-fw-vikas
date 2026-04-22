@@ -531,12 +531,33 @@ impl PacketIO for NFQueuePacketIO {
         // which is the default behavior for nfq::Queue.
         tokio::spawn(async move {
             loop {
-                let msg = {
-                    let mut q = queue.lock().await;
-                    q.recv()
+                let queue_clone = queue.clone();
+                let recv_result = tokio::time::timeout(
+                    std::time::Duration::from_secs(30),
+                    tokio::task::spawn_blocking(move || {
+                        let mut q = queue_clone.blocking_lock();
+                        q.recv()
+                    }),
+                )
+                .await;
+
+                let mut msg = match recv_result {
+                    Ok(Ok(Ok(msg))) => msg,
+                    Ok(Ok(Err(e))) => {
+                        warn!("NFQUEUE recv error: {:?}", e);
+                        continue;
+                    }
+                    Ok(Err(_)) => {
+                        error!("NFQUEUE recv task panicked");
+                        break;
+                    }
+                    Err(_) => {
+                        warn!("NFQUEUE recv timeout — queue may be stalled");
+                        continue;
+                    }
                 };
 
-                if let Ok(mut msg) = msg {
+                {
                     // Get the attributes of the message.
                     //let packet_id = msg.get_packet_id();
                     let payload = msg.get_payload();

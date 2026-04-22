@@ -11,10 +11,14 @@ FROM rust:1.83-bookworm AS rust-builder
 
 RUN apt-get update && apt-get install -y \
     pkg-config libpcap-dev build-essential libssl-dev \
+    nodejs npm \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
 COPY . .
+
+# Build frontend
+RUN cd front && npm ci && npm run build
 
 # Build only QuickFW binaries (not the full GFW-RS suite)
 RUN cargo build --release \
@@ -82,8 +86,8 @@ RUN chmod 755 config/includes.chroot/usr/local/bin/quickfw-api \
               config/includes.chroot/usr/local/bin/quickfw \
               config/includes.chroot/usr/local/bin/quickfw-setup
 
-# Copy web frontend
-COPY front/ config/includes.chroot/opt/front/
+# Copy web frontend (built dist) into the path STATIC_FILES_PATH expects
+COPY --from=rust-builder /build/front/dist/ config/includes.chroot/opt/quickfw/front/
 
 # Copy rootfs overlay (sysctl, modprobe, systemd, nftables, etc.)
 COPY rootfs/etc/ config/includes.chroot/etc/

@@ -15,8 +15,15 @@ use serde::Serialize;
 use std::collections::VecDeque;
 use std::net::SocketAddr;
 use std::sync::Mutex;
+use tokio::sync::Mutex as TokioMutex;
 
 use crate::auth::AuthUser;
+
+static AUDIT_FILE_LOCK: std::sync::OnceLock<TokioMutex<()>> = std::sync::OnceLock::new();
+
+fn audit_file_lock() -> &'static TokioMutex<()> {
+    AUDIT_FILE_LOCK.get_or_init(|| TokioMutex::new(()))
+}
 
 const MAX_AUDIT_ENTRIES: usize = 200;
 const AUDIT_LOG_PATH: &str = "/var/log/quickfw/audit.log";
@@ -73,7 +80,7 @@ pub async fn audit_middleware(request: Request, next: Next) -> Response {
 
         // Append to log file
         if let Ok(line) = serde_json::to_string(&entry) {
-            let _ = append_audit_line(&format!("{}\n", line));
+            let _ = append_audit_line(&format!("{}\n", line)).await;
         }
 
         // Store in memory ring buffer
@@ -90,31 +97,46 @@ pub async fn audit_middleware(request: Request, next: Next) -> Response {
 fn unix_now() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or_else(|e| {
+            tracing::warn!("System clock is before Unix epoch: {}. Treating as epoch.", e);
+            std::time::Duration::from_secs(0)
+        })
         .as_secs()
 }
 
 const AUDIT_MAX_BYTES: u64 = 10 * 1024 * 1024; // 10 MB
 const AUDIT_KEEP_BYTES: usize = 5 * 1024 * 1024; // 5 MB
 
-fn append_audit_line(content: &str) -> std::io::Result<()> {
-    use std::io::{Read, Write};
-    let _ = std::fs::create_dir_all("/var/log/quickfw");
+async fn append_audit_line(content: &str) -> std::io::Result<()> {
+    use std::io::{Read, Seek, Write};
+    let _guard = audit_file_lock().lock().await;
+    let _ = tokio::fs::create_dir_all("/var/log/quickfw").await;
 
     // Rotate if file exceeds 10 MB: keep the last 5 MB
-    if let Ok(meta) = std::fs::metadata(AUDIT_LOG_PATH) {
+    if let Ok(meta) = tokio::fs::metadata(AUDIT_LOG_PATH).await {
         if meta.len() > AUDIT_MAX_BYTES {
             if let Ok(mut f) = std::fs::File::open(AUDIT_LOG_PATH) {
                 let skip = meta.len() as usize - AUDIT_KEEP_BYTES;
                 let mut buf = Vec::with_capacity(AUDIT_KEEP_BYTES);
-                let _ = std::io::Seek::seek(&mut f, std::io::SeekFrom::Start(skip as u64));
+                let _ = f.seek(std::io::SeekFrom::Start(skip as u64));
                 let _ = f.read_to_end(&mut buf);
                 drop(f);
                 // Trim to the next newline boundary so we don't leave a partial line
                 if let Some(pos) = buf.iter().position(|&b| b == b'\n') {
                     buf = buf[pos + 1..].to_vec();
                 }
-                let _ = std::fs::write(AUDIT_LOG_PATH, &buf);
+                // Atomic rotation: write to temp, fsync, rename
+                let tmp = format!("{}.tmp", AUDIT_LOG_PATH);
+                let mut tmp_file = std::fs::File::create(&tmp)?;
+                tmp_file.write_all(&buf)?;
+                tmp_file.sync_all()?;
+                drop(tmp_file);
+                std::fs::rename(&tmp, AUDIT_LOG_PATH)?;
+                if let Some(parent) = std::path::Path::new(AUDIT_LOG_PATH).parent() {
+                    if let Ok(dir) = std::fs::File::open(parent) {
+                        let _ = dir.sync_all();
+                    }
+                }
             }
         }
     }
@@ -124,5 +146,6 @@ fn append_audit_line(content: &str) -> std::io::Result<()> {
         .append(true)
         .open(AUDIT_LOG_PATH)?;
     file.write_all(content.as_bytes())?;
+    file.sync_all()?;
     Ok(())
 }

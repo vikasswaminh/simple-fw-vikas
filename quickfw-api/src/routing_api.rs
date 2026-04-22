@@ -12,7 +12,7 @@ use tracing::{error, info, warn};
 
 use routing::{bgp, ospf, StaticRoutesConfig};
 
-use crate::validation;
+use crate::{state, validation};
 
 pub async fn create_router() -> Router {
     Router::new()
@@ -27,12 +27,14 @@ pub async fn create_router() -> Router {
 }
 
 async fn get_ospf_config() -> Json<ospf::OspfConfig> {
+    let _guard = state::config_lock().lock().await;
     Json(ospf::load_ospf_config())
 }
 
 async fn save_ospf_config(
     Json(config): Json<ospf::OspfConfig>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+    let _guard = state::config_lock().lock().await;
     // Validate
     if let Err(e) = ospf::validate_ospf_config(&config) {
         warn!("OSPF config validation failed: {}", e);
@@ -68,12 +70,14 @@ async fn save_ospf_config(
 }
 
 async fn get_bgp_config() -> Json<bgp::BgpConfig> {
+    let _guard = state::config_lock().lock().await;
     Json(bgp::load_bgp_config())
 }
 
 async fn save_bgp_config(
     Json(config): Json<bgp::BgpConfig>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+    let _guard = state::config_lock().lock().await;
     // Validate
     if let Err(e) = bgp::validate_bgp_config(&config) {
         warn!("BGP config validation failed: {}", e);
@@ -151,6 +155,7 @@ async fn get_bgp_summary() -> Result<impl IntoResponse, (StatusCode, Json<serde_
 }
 
 async fn get_active_protocols() -> Json<serde_json::Value> {
+    let _guard = state::config_lock().lock().await;
     let ospf_config = ospf::load_ospf_config();
     let bgp_config = bgp::load_bgp_config();
 

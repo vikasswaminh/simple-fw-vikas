@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { HostnameSchema, TimestampSchema } from './common';
+import { HostnameSchema } from './common';
 
 /**
  * System-related validation schemas

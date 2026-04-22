@@ -36,21 +36,37 @@ fn is_valid_time(s: &str) -> bool {
 }
 
 /// Complete firewall policy configuration.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FirewallConfig {
     #[serde(default)]
     pub rules: Vec<FirewallRule>,
-    #[serde(default = "default_accept")]
+    #[serde(default = "default_deny")]
     pub forward_policy: String,
-    #[serde(default = "default_accept")]
+    #[serde(default = "default_deny")]
     pub input_policy: String,
-    #[serde(default = "default_accept")]
+    #[serde(default = "default_deny")]
     pub output_policy: String,
     #[serde(default)]
     pub zones: Vec<ZoneMapping>,
 }
 
-fn default_accept() -> String {
+impl Default for FirewallConfig {
+    fn default() -> Self {
+        Self {
+            rules: Vec::new(),
+            forward_policy: "drop".to_string(),
+            input_policy: "drop".to_string(),
+            output_policy: "drop".to_string(),
+            zones: Vec::new(),
+        }
+    }
+}
+
+fn default_deny() -> String {
+    "drop".to_string()
+}
+
+fn default_rule_accept() -> String {
     "accept".to_string()
 }
 
@@ -89,7 +105,7 @@ pub struct FirewallRule {
     pub dst_ip: String,
     #[serde(default)]
     pub dst_port: String,
-    #[serde(default = "default_accept")]
+    #[serde(default = "default_rule_accept")]
     pub action: String,
     #[serde(default)]
     pub log: bool,
@@ -131,28 +147,28 @@ const FW_CONFIG_PATH: &str = "/etc/quickfw/firewall.yaml";
 
 /// Load firewall config from disk.
 ///
-/// Returns default config if the file doesn't exist.
-/// Returns an error log + default if the file exists but fails to parse
-/// (prevents silently wiping rules on corrupted YAML).
-pub fn load_firewall_config() -> FirewallConfig {
+/// Returns default deny-all config if the file doesn't exist (first boot).
+/// Returns an error if the file exists but fails to parse, so callers can
+/// decide to abort or apply a safe fallback.
+pub fn load_firewall_config() -> Result<FirewallConfig, Box<dyn std::error::Error>> {
     match std::fs::read_to_string(FW_CONFIG_PATH) {
         Ok(contents) => match serde_yaml::from_str(&contents) {
-            Ok(config) => config,
+            Ok(config) => Ok(config),
             Err(e) => {
                 error!(
-                    "Failed to parse firewall config at {}: {}. Returning default (NOT overwriting).",
+                    "Failed to parse firewall config at {}: {}. Refusing to load.",
                     FW_CONFIG_PATH, e
                 );
-                FirewallConfig::default()
+                Err(format!("parse error: {}", e).into())
             }
         },
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            info!("No firewall config found at {}, using defaults", FW_CONFIG_PATH);
-            FirewallConfig::default()
+            info!("No firewall config found at {}, using safe defaults", FW_CONFIG_PATH);
+            Ok(FirewallConfig::default())
         }
         Err(e) => {
             error!("Failed to read firewall config at {}: {}", FW_CONFIG_PATH, e);
-            FirewallConfig::default()
+            Err(format!("read error: {}", e).into())
         }
     }
 }
@@ -437,7 +453,77 @@ pub fn generate_firewall_nft_script(config: &FirewallConfig) -> String {
     script
 }
 
+/// Snapshot the current nftables ruleset to a temp file.
+fn snapshot_nft_ruleset() -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
+    let output = Command::new("nft")
+        .args(["list", "ruleset"])
+        .output()?;
+
+    if !output.status.success() {
+        return Err("nft list ruleset failed".into());
+    }
+
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let path = std::path::PathBuf::from(format!("/tmp/nft-rollback-{}.nft", timestamp));
+    std::fs::write(&path, &output.stdout)?;
+    Ok(path)
+}
+
+/// Restore nftables ruleset from a snapshot file.
+fn restore_nft_ruleset(path: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
+    let output = Command::new("nft")
+        .args(["-f", &path.to_string_lossy()])
+        .output()?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("nft restore failed: {}", stderr).into());
+    }
+
+    Ok(())
+}
+
+/// Apply a hardcoded emergency ruleset that keeps management access open.
+fn apply_emergency_mgmt_ruleset() -> Result<(), Box<dyn std::error::Error>> {
+    let emergency = format!(
+        "table {} {} {{
+  chain MGMT_SAFETY {{
+    type filter hook input priority 100; policy accept;
+    tcp dport {{ 22, 443, 3000 }} accept
+    icmp type echo-request accept
+  }}
+}}\n",
+        NFT_FAMILY, NFT_TABLE
+    );
+
+    let mut child = Command::new("nft")
+        .args(["-f", "-"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(emergency.as_bytes())?;
+    }
+
+    let result = child.wait_with_output()?;
+    if !result.status.success() {
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        return Err(format!("Emergency ruleset failed: {}", stderr).into());
+    }
+
+    Ok(())
+}
+
 /// Apply firewall rules.
+///
+/// Snapshots the existing ruleset before applying. If the new ruleset fails,
+/// automatically restores the snapshot. If restore also fails, applies a
+/// minimal emergency management-access ruleset as a last resort.
 pub fn apply_firewall(config: &FirewallConfig) -> Result<(), Box<dyn std::error::Error>> {
     let script = generate_firewall_nft_script(config);
     info!(
@@ -445,6 +531,15 @@ pub fn apply_firewall(config: &FirewallConfig) -> Result<(), Box<dyn std::error:
         config.rules.len(),
         &script
     );
+
+    // Snapshot current ruleset for rollback
+    let snapshot_path = match snapshot_nft_ruleset() {
+        Ok(path) => Some(path),
+        Err(e) => {
+            error!("Failed to snapshot nftables ruleset: {}. Proceeding without rollback.", e);
+            None
+        }
+    };
 
     let mut child = Command::new("nft")
         .args(["-f", "-"])
@@ -462,11 +557,55 @@ pub fn apply_firewall(config: &FirewallConfig) -> Result<(), Box<dyn std::error:
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         error!("Failed to apply firewall rules: {}", stderr);
+
+        // Attempt rollback
+        if let Some(ref path) = snapshot_path {
+            info!("Attempting rollback from {}", path.display());
+            if let Err(restore_err) = restore_nft_ruleset(path) {
+                error!("Rollback failed: {}. Applying emergency ruleset.", restore_err);
+                if let Err(e) = apply_emergency_mgmt_ruleset() {
+                    error!("Emergency ruleset also failed: {}", e);
+                }
+            } else {
+                info!("Rollback successful");
+            }
+        }
+
         return Err(format!("nft failed: {}", stderr).into());
+    }
+
+    // Clean up snapshot on success (keep last 10)
+    if let Some(path) = snapshot_path {
+        let _ = std::fs::remove_file(&path);
+        prune_rollback_files();
     }
 
     info!("Firewall rules applied successfully");
     Ok(())
+}
+
+/// Keep only the last 10 rollback snapshot files.
+fn prune_rollback_files() {
+    let mut files: Vec<_> = match std::fs::read_dir("/tmp") {
+        Ok(entries) => entries
+            .flatten()
+            .filter_map(|e| {
+                let name = e.file_name().to_string_lossy().to_string();
+                if name.starts_with("nft-rollback-") && name.ends_with(".nft") {
+                    e.metadata().ok().map(|m| (e.path(), m.modified().ok()))
+                } else {
+                    None
+                }
+            })
+            .collect(),
+        Err(_) => return,
+    };
+
+    files.sort_by(|a, b| b.1.cmp(&a.1)); // newest first
+
+    for (path, _) in files.iter().skip(10) {
+        let _ = std::fs::remove_file(path);
+    }
 }
 
 /// Remove firewall chains.
@@ -478,4 +617,47 @@ pub fn remove_firewall() -> Result<(), Box<dyn std::error::Error>> {
     }
     info!("Firewall chains removed");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn firewall_config_default_is_deny() {
+        let config = FirewallConfig::default();
+        assert_eq!(config.input_policy, "drop");
+        assert_eq!(config.forward_policy, "drop");
+        assert_eq!(config.output_policy, "drop");
+        assert!(config.rules.is_empty());
+        assert!(config.zones.is_empty());
+    }
+
+    #[test]
+    fn firewall_config_deserialize_missing_policies_defaults_to_deny() {
+        let yaml = "rules: []\n";
+        let config: FirewallConfig = serde_yaml::from_str(yaml).expect("should parse");
+        assert_eq!(config.input_policy, "drop");
+        assert_eq!(config.forward_policy, "drop");
+        assert_eq!(config.output_policy, "drop");
+    }
+
+    #[test]
+    fn firewall_config_deserialize_rule_action_defaults_to_accept() {
+        let yaml = r#"
+rules:
+  - name: test
+"#;
+        let config: FirewallConfig = serde_yaml::from_str(yaml).expect("should parse");
+        assert_eq!(config.rules.len(), 1);
+        assert_eq!(config.rules[0].action, "accept");
+    }
+
+    #[test]
+    fn firewall_config_deserialize_malformed_yaml_fails() {
+        let yaml = "rules: [not_valid_yaml: :::";
+        let result: Result<FirewallConfig, _> = serde_yaml::from_str(yaml);
+        assert!(result.is_err(), "Malformed YAML should fail to parse");
+    }
+
 }

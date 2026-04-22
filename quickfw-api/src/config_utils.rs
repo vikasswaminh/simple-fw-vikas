@@ -34,6 +34,11 @@ pub fn atomic_write(path: &str, content: &str) -> std::io::Result<()> {
     file.write_all(content.as_bytes())?;
     file.sync_all()?;
     std::fs::rename(&tmp_path, path)?;
+    // Sync parent directory so the rename is durable after a crash.
+    if let Some(parent) = std::path::Path::new(path).parent() {
+        let dir = std::fs::File::open(parent)?;
+        dir.sync_all()?;
+    }
     Ok(())
 }
 

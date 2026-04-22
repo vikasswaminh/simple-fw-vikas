@@ -193,8 +193,10 @@ pub fn apply_interface_config(config: &ApplianceNetConfig) -> Result<(), Box<dyn
     }
 
     // Enable IP forwarding
-    let _ = fs::write("/proc/sys/net/ipv4/ip_forward", "1");
-    let _ = fs::write("/proc/sys/net/ipv6/conf/all/forwarding", "1");
+    fs::write("/proc/sys/net/ipv4/ip_forward", "1")
+        .map_err(|e| format!("Failed to enable IPv4 forwarding: {}", e))?;
+    fs::write("/proc/sys/net/ipv6/conf/all/forwarding", "1")
+        .map_err(|e| format!("Failed to enable IPv6 forwarding: {}", e))?;
 
     info!("Network configuration applied successfully");
     Ok(())

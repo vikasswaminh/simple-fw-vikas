@@ -7,4 +7,5 @@ output/
 *.vmem
 *.lck
 *.dmp
-Cargo.lock
+# Cargo.lock is intentionally tracked for reproducible builds of binaries
+# Cargo.lock

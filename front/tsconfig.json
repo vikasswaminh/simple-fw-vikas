@@ -20,13 +20,21 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"],
+      "@components": ["src/components/index.ts"],
       "@components/*": ["src/components/*"],
+      "@pages": ["src/pages/index.ts"],
       "@pages/*": ["src/pages/*"],
+      "@schemas": ["src/schemas/index.ts"],
       "@schemas/*": ["src/schemas/*"],
       "@types/*": ["src/types/*"],
+      "@utils": ["src/utils/index.ts"],
       "@utils/*": ["src/utils/*"],
+      "@api": ["src/api/index.ts"],
       "@api/*": ["src/api/*"],
-      "@router/*": ["src/router/*"]
+      "@router": ["src/router/index.ts"],
+      "@router/*": ["src/router/*"],
+      "@state": ["src/state/store.ts"],
+      "@state/*": ["src/state/*"]
     }
   },
   "include": ["src/**/*.ts"],

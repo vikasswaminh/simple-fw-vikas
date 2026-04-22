@@ -1,6 +1,7 @@
 import { Component } from '@components/component';
 import { systemApi, configApi, toolsApi, authApi } from '@api/endpoints';
 import { showToast } from '@components/toast';
+import { escapeHtml } from '@utils';
 
 export class SettingsPage extends Component<{
   settings: Record<string, unknown> | null;
@@ -159,7 +160,7 @@ export class SettingsPage extends Component<{
             <table class="table">
               <thead><tr><th>Property</th><th>Value</th></tr></thead>
               <tbody>
-                ${Object.entries(ntp).map(([k, v]) => `<tr><td style="font-weight: 500;">${k}</td><td>${v}</td></tr>`).join('')}
+                ${Object.entries(ntp).map(([k, v]) => `<tr><td style="font-weight: 500;">${escapeHtml(k)}</td><td>${escapeHtml(v as string)}</td></tr>`).join('')}
               </tbody>
             </table>
           </div>
