@@ -123,8 +123,8 @@ export class DashboardPage extends Component<{
     }
 
     const si = systemInfo!;
-    const cpuPct = si.cpu_percent ?? 0;
-    const memPct = si.mem_total_mb > 0 ? Math.round((si.mem_used_mb / si.mem_total_mb) * 100) : 0;
+    const cpuPct = si.cpu_usage_percent ?? 0;
+    const memPct = si.memory_total_mb > 0 ? Math.round((si.memory_used_mb / si.memory_total_mb) * 100) : 0;
 
     this.element.innerHTML = `
       <!-- Page Header -->
@@ -170,7 +170,7 @@ export class DashboardPage extends Component<{
           <div style="margin-top: var(--spacing-md);">
             <div class="kv-row"><span class="kv-label">Hostname</span><span class="kv-value">${si.hostname}</span></div>
             <div class="kv-row"><span class="kv-label">Version</span><span class="kv-value">${si.version}</span></div>
-            <div class="kv-row"><span class="kv-label">Uptime</span><span class="kv-value">${formatUptime(si.uptime)}</span></div>
+            <div class="kv-row"><span class="kv-label">Uptime</span><span class="kv-value">${formatUptime(si.uptime_seconds)}</span></div>
             <div class="kv-row">
               <span class="kv-label">CPU</span>
               <span class="kv-value">${cpuPct}%</span>
@@ -178,7 +178,7 @@ export class DashboardPage extends Component<{
             <div class="progress" style="margin-bottom: 8px;"><div class="progress-bar ${cpuPct > 80 ? 'danger' : cpuPct > 60 ? 'warning' : ''}" style="width: ${cpuPct}%"></div></div>
             <div class="kv-row">
               <span class="kv-label">Memory</span>
-              <span class="kv-value">${si.mem_used_mb} / ${si.mem_total_mb} MB</span>
+              <span class="kv-value">${si.memory_used_mb} / ${si.memory_total_mb} MB</span>
             </div>
             <div class="progress"><div class="progress-bar ${memPct > 80 ? 'danger' : memPct > 60 ? 'warning' : ''}" style="width: ${memPct}%"></div></div>
           </div>

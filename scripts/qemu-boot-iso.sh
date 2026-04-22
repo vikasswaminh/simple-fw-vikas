@@ -1,15 +1,17 @@
 #!/bin/bash
-# Boot quickfw.iso in QEMU with port-forwarded management.
+# Boot quickfw.iso in QEMU with 4 virtual NICs:
+#   eth0 = SLIRP user-mode net (management + hostfwd)
+#   eth1 = WAN   (socket net between appliance & fake ISP — isolated)
+#   eth2 = LAN   (socket net — can simulate LAN clients later)
+#   eth3 = DMZ   (socket net — reserved)
 #
-# Uses direct kernel+initrd boot to bypass the isolinux menu
-# (which has `timeout 0` = indefinite wait) and enable serial console.
-#
-# Host ports mapped to guest:
+# Host ports mapped to the SLIRP NIC only:
 #   8443 -> 443  (HTTPS dashboard)
 #   8080 -> 3000 (HTTP redirect)
-#   2222 -> 22   (SSH)
+#   2222 -> 22   (SSH if enabled)
 #
-# Usage: bash qemu-boot-iso.sh [path-to-iso]
+# Extracts kernel+initrd from the ISO because the isolinux menu has
+# `timeout 0` = infinite wait.
 
 set -euo pipefail
 
@@ -17,8 +19,8 @@ ISO="${1:-/opt/quickfw-src/output/quickfw.iso}"
 LOGDIR=/var/log/quickfw-qemu
 PIDFILE=/run/quickfw-qemu.pid
 MONITOR=/run/quickfw-qemu.monitor
-SERIAL_LOG=$LOGDIR/serial.log
 SERIAL_SOCK=/run/quickfw-qemu.serial
+SERIAL_LOG=$LOGDIR/serial.log
 KERNEL=/boot/quickfw-iso/vmlinuz
 INITRD=/boot/quickfw-iso/initrd.img
 
@@ -30,7 +32,6 @@ if [[ ! -f "$ISO" ]]; then
 fi
 
 if [[ ! -f "$KERNEL" || ! -f "$INITRD" ]]; then
-    echo "Kernel/initrd missing — extracting from ISO..."
     mkdir -p /boot/quickfw-iso /mnt/iso
     mount -o loop,ro "$ISO" /mnt/iso
     cp -f /mnt/iso/live/vmlinuz "$KERNEL"
@@ -38,34 +39,21 @@ if [[ ! -f "$KERNEL" || ! -f "$INITRD" ]]; then
     umount /mnt/iso
 fi
 
-# Stop any previous instance
+# Stop previous instance
 if [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
-    echo "[+] Stopping existing QEMU (pid $(cat "$PIDFILE"))"
     kill "$(cat "$PIDFILE")" || true
     sleep 2
 fi
-rm -f "$PIDFILE" "$MONITOR"
+rm -f "$PIDFILE" "$MONITOR" "$SERIAL_SOCK"
 
-# KVM acceleration if available, else TCG
 ACCEL_ARGS="-enable-kvm -cpu host"
-if [[ ! -w /dev/kvm ]]; then
-    echo "[!] /dev/kvm not writable, falling back to TCG (slower)"
-    ACCEL_ARGS=""
-fi
+[[ ! -w /dev/kvm ]] && ACCEL_ARGS=""
 
-# Truncate old serial log
+KERNEL_APPEND="boot=live components hostname=quickfw toram console=ttyS0,115200"
+
 : > "$SERIAL_LOG"
 
 echo "[+] Launching QEMU with ISO: $ISO"
-echo "[+]                  kernel:  $KERNEL"
-echo "[+]                  initrd:  $INITRD"
-echo "[+] Serial log: $SERIAL_LOG"
-
-# boot=live components: standard live-boot args
-# hostname=quickfw toram: from ISO's live.cfg
-# console=ttyS0,115200: route kernel + systemd logs to serial
-# quiet: suppress kernel spam (optional)
-KERNEL_APPEND="boot=live components hostname=quickfw toram console=ttyS0,115200"
 
 qemu-system-x86_64 \
     $ACCEL_ARGS \
@@ -75,8 +63,19 @@ qemu-system-x86_64 \
     -initrd "$INITRD" \
     -append "$KERNEL_APPEND" \
     -cdrom "$ISO" \
-    -netdev user,id=net0,hostfwd=tcp::8443-:443,hostfwd=tcp::8080-:3000,hostfwd=tcp::2222-:22 \
-    -device virtio-net-pci,netdev=net0 \
+    \
+    -netdev user,id=mgmt,hostfwd=tcp::8443-:443,hostfwd=tcp::8080-:3000,hostfwd=tcp::2222-:22 \
+    -device virtio-net-pci,netdev=mgmt,mac=52:54:00:00:00:01 \
+    \
+    -netdev socket,id=wan,listen=127.0.0.1:11001 \
+    -device virtio-net-pci,netdev=wan,mac=52:54:00:00:00:02 \
+    \
+    -netdev socket,id=lan,listen=127.0.0.1:11002 \
+    -device virtio-net-pci,netdev=lan,mac=52:54:00:00:00:03 \
+    \
+    -netdev socket,id=dmz,listen=127.0.0.1:11003 \
+    -device virtio-net-pci,netdev=dmz,mac=52:54:00:00:00:04 \
+    \
     -display none \
     -serial "unix:$SERIAL_SOCK,server=on,wait=off" \
     -monitor "unix:$MONITOR,server,nowait" \
@@ -86,6 +85,7 @@ qemu-system-x86_64 \
 sleep 2
 if [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
     echo "[+] QEMU running as PID $(cat "$PIDFILE")"
+    echo "[+] NICs: eth0=SLIRP-mgmt, eth1=WAN, eth2=LAN, eth3=DMZ"
 else
     echo "[x] QEMU did not start" >&2
     exit 1
@@ -95,4 +95,3 @@ echo "[+] Serial socket:      $SERIAL_SOCK"
 echo "[+] Serial log (passive): $SERIAL_LOG"
 echo "[+] QEMU monitor:       socat - UNIX-CONNECT:$MONITOR"
 echo "[+] Dashboard (guest):  https://172.16.60.145:8443/"
-echo "[+] SSH to guest:       ssh -p 2222 root@172.16.60.145"

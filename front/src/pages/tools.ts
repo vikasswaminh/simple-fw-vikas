@@ -19,7 +19,12 @@ export class ToolsPage extends Component<{
     };
   }
 
-  async init(): Promise<void> { /* lazy load */ }
+  async init(): Promise<void> {
+    // Nothing to lazy-load on init, but we still need to paint the page.
+    // Component.setState only calls render() when state actually changes,
+    // so call render() directly here.
+    this.render();
+  }
 
   render(): void {
     const { activeTab, pingResult, tracerouteResult, conntrack, wolStatus, loading } = this.state;

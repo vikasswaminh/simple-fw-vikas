@@ -1,6 +1,7 @@
 /target/
 node_modules/
 front/dist/
+e2e-artifacts/
 *.iso
 output/
 *.vmdk

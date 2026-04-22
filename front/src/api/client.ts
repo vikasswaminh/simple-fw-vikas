@@ -1,6 +1,10 @@
 import { z } from 'zod';
 
-const API_BASE = '/api';
+// Endpoints in endpoints.ts already include the '/api/' prefix, so keep the
+// base empty. A non-empty base here double-prefixed every call to
+// /api/api/... — the server's SPA fallback then returned index.html,
+// producing "Unexpected token '<'" on JSON.parse in the dashboard.
+const API_BASE = '';
 
 interface ApiError {
   status: number;

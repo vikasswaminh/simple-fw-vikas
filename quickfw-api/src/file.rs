@@ -13,10 +13,30 @@ pub async fn create_router() -> Router {
         .route("/", get(serve_index))
         .route("/index.html", get(serve_index))
         .route("/login.html", get(serve_login))
+        .route("/favicon.ico", get(serve_favicon))
         .route("/fonts/:filename", get(serve_font))
         .route("/assets/:filename", get(serve_asset))
-        .route("/:filename", get(serve_static_file))
-        .fallback(serve_index) // SPA fallback for deep links
+        // NB: no catch-all /:filename route — we previously had one that
+        // returned 404 for any path without a known extension, which broke
+        // SPA deep links like /firewall or /network. The fallback below
+        // serves index.html so the client-side router can take over.
+        .fallback(serve_index)
+}
+
+async fn serve_favicon() -> Result<axum::response::Response<axum::body::Body>, axum::http::StatusCode> {
+    let path = format!("{}/favicon.ico", *STATIC_FILES_PATH);
+    match fs::read(&path).await {
+        Ok(bytes) => axum::response::Response::builder()
+            .header("Content-Type", "image/x-icon")
+            .header("Cache-Control", "public, max-age=86400")
+            .body(axum::body::Body::from(bytes))
+            .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR),
+        // No favicon shipped? Return 204 so the browser stops asking.
+        Err(_) => Ok(axum::response::Response::builder()
+            .status(axum::http::StatusCode::NO_CONTENT)
+            .body(axum::body::Body::empty())
+            .unwrap_or_default()),
+    }
 }
 
 async fn serve_asset(
@@ -91,48 +111,6 @@ async fn serve_login() -> axum::response::Html<String> {
         .await
         .unwrap_or_else(|_| "Error loading login.html".to_string());
     axum::response::Html(content)
-}
-
-async fn serve_static_file(
-    Path(filename): Path<String>,
-) -> Result<axum::response::Response<axum::body::Body>, axum::http::StatusCode> {
-    // Only allow safe filenames — no path traversal
-    if filename.contains("..") || filename.starts_with('.') {
-        return Err(axum::http::StatusCode::BAD_REQUEST);
-    }
-    if !filename
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
-    {
-        return Err(axum::http::StatusCode::BAD_REQUEST);
-    }
-    // Extension allowlist
-    let content_type = if filename.ends_with(".css") {
-        "text/css"
-    } else if filename.ends_with(".js") {
-        "application/javascript"
-    } else if filename.ends_with(".html") {
-        "text/html"
-    } else if filename.ends_with(".svg") {
-        "image/svg+xml"
-    } else if filename.ends_with(".ico") {
-        "image/x-icon"
-    } else if filename.ends_with(".woff2") {
-        "font/woff2"
-    } else if filename.ends_with(".json") {
-        "application/json"
-    } else {
-        return Err(axum::http::StatusCode::NOT_FOUND);
-    };
-    let path = format!("{}/{}", *STATIC_FILES_PATH, filename);
-    match fs::read(&path).await {
-        Ok(bytes) => axum::response::Response::builder()
-            .header("Content-Type", content_type)
-            .header("Cache-Control", "no-cache, must-revalidate")
-            .body(axum::body::Body::from(bytes))
-            .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR),
-        Err(_) => Err(axum::http::StatusCode::NOT_FOUND),
-    }
 }
 
 async fn serve_font(

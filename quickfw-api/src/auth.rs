@@ -7,7 +7,7 @@ use argon2::{
 };
 use axum::{
     extract::Request,
-    http::{header, StatusCode},
+    http::{self, header, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
     routing::post,
@@ -105,15 +105,14 @@ pub async fn basic_auth_middleware(
     let client_ip = get_client_ip(&request);
     let now = unix_now();
 
-    // --- Skip rate limiting for static assets ---
-    let is_static = path.ends_with(".js")
-        || path.ends_with(".css")
-        || path.ends_with(".html")
-        || path.ends_with(".woff2")
-        || path.ends_with(".svg")
-        || path.ends_with(".ico")
-        || path.starts_with("/fonts/")
-        || path == "/";
+    // --- Skip rate limiting + auth for static assets and SPA deep links ---
+    // The SPA handles its own client-side routing; any non-/api/, non-/ws path
+    // is served as index.html by the fallback (see file.rs). That HTML page is
+    // public — the SPA enforces auth on subsequent API calls.
+    let method = request.method().clone();
+    let is_static = !path.starts_with("/api/")
+        && path != "/ws"
+        && (method == http::Method::GET || method == http::Method::HEAD);
 
     // --- Rate limiting (API endpoints only) ---
     if !is_static {
