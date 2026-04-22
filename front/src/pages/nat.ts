@@ -2,6 +2,7 @@ import { Component } from '@components/component';
 import { natApi } from '@api/endpoints';
 import { openModal, closeModal } from '@components/modal';
 import { showToast } from '@components/toast';
+import { escapeHtml } from '@utils';
 import type { NatConfig, MasqueradeRule, PortForwardRule } from '@schemas';
 
 export class NatPage extends Component<{
@@ -36,7 +37,7 @@ export class NatPage extends Component<{
         <div class="form-group"><label class="form-label">Source CIDR</label><input type="text" class="form-input" id="masq-cidr" placeholder="192.168.1.0/24"></div>
         <div class="form-group"><label class="form-label">Description</label><input type="text" class="form-input" id="masq-desc" placeholder="LAN to WAN"></div>
       `,
-      footer: `<button class="btn btn-secondary" onclick="document.querySelector('.modal-close')?.click()">Cancel</button><button class="btn btn-primary" data-modal-submit>Add</button>`,
+      footer: `<button class="btn btn-secondary" data-modal-close>Cancel</button><button class="btn btn-primary" data-modal-submit>Add</button>`,
       onSubmit: async () => {
         const modal = document.querySelector('.modal');
         if (!modal) return;
@@ -68,7 +69,7 @@ export class NatPage extends Component<{
         </div>
         <div class="form-group"><label class="form-label">Forward To (IP:Port)</label><input type="text" class="form-input" id="pf-fwd" placeholder="192.168.1.100:8080"></div>
       `,
-      footer: `<button class="btn btn-secondary" onclick="document.querySelector('.modal-close')?.click()">Cancel</button><button class="btn btn-primary" data-modal-submit>Add</button>`,
+      footer: `<button class="btn btn-secondary" data-modal-close>Cancel</button><button class="btn btn-primary" data-modal-submit>Add</button>`,
       onSubmit: async () => {
         const modal = document.querySelector('.modal');
         if (!modal) return;
@@ -164,8 +165,8 @@ export class NatPage extends Component<{
           <tbody>
             ${rules.length > 0 ? rules.map((r: MasqueradeRule, idx: number) => `
               <tr>
-                <td class="mono">${r.out_interface}</td>
-                <td class="mono">${r.source_cidr || 'any'}</td>
+                <td class="mono">${escapeHtml(r.out_interface)}</td>
+                <td class="mono">${escapeHtml(r.source_cidr || 'any')}</td>
                 <td>—</td>
                 <td><label class="toggle"><input type="checkbox" checked disabled><span class="toggle-track"></span></label></td>
                 <td><div class="actions">
@@ -189,10 +190,10 @@ export class NatPage extends Component<{
           <tbody>
             ${rules.length > 0 ? rules.map((r: PortForwardRule, idx: number) => `
               <tr>
-                <td class="mono">${r.in_interface}</td>
-                <td style="text-transform: uppercase;">${r.protocol}</td>
-                <td class="mono">${r.dest_port}</td>
-                <td class="mono">${r.forward_to}</td>
+                <td class="mono">${escapeHtml(r.in_interface)}</td>
+                <td style="text-transform: uppercase;">${escapeHtml(r.protocol)}</td>
+                <td class="mono">${escapeHtml(String(r.dest_port))}</td>
+                <td class="mono">${escapeHtml(r.forward_to)}</td>
                 <td><label class="toggle"><input type="checkbox" checked disabled><span class="toggle-track"></span></label></td>
                 <td><div class="actions">
                   <button class="btn-icon" title="Edit">✎</button>

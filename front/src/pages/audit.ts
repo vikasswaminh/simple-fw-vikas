@@ -59,8 +59,20 @@ export class AuditPage extends Component<{
       mime = 'application/json';
       ext = 'json';
     } else {
+      // Quote + escape every field per RFC 4180. Prefix ' on cells that start
+      // with =, +, -, @, \t, \r so Excel/LibreOffice won't execute them as
+      // formulas when an admin opens the export.
+      const csvEscape = (v: string | number): string => {
+        const s = String(v);
+        const safeStart = /^[=+\-@\t\r]/.test(s) ? "'" + s : s;
+        const needsQuote = /[",\n\r]/.test(safeStart);
+        return needsQuote ? '"' + safeStart.replace(/"/g, '""') + '"' : safeStart;
+      };
       const headers = 'timestamp,method,endpoint,user,source_ip,status\n';
-      content = headers + data.map((e: AuditEntry) => `${e.timestamp},${e.method},${e.endpoint},${e.user},${e.source_ip},${e.status}`).join('\n');
+      content = headers + data.map((e: AuditEntry) =>
+        [e.timestamp, e.method, e.endpoint, e.user, e.source_ip, e.status]
+          .map(csvEscape).join(',')
+      ).join('\n');
       mime = 'text/csv';
       ext = 'csv';
     }
@@ -128,11 +140,11 @@ export class AuditPage extends Component<{
               ${pageData.map((e: AuditEntry) => `
                 <tr>
                   <td style="white-space: nowrap;">${formatTime(e.timestamp)}</td>
-                  <td><span class="badge ${this.methodBadge(e.method)} badge-sm">${e.method}</span></td>
+                  <td><span class="badge ${this.methodBadge(e.method)} badge-sm">${escapeHtml(e.method)}</span></td>
                   <td class="mono">${escapeHtml(e.endpoint)}</td>
                   <td>${escapeHtml(e.user)}</td>
                   <td class="mono">${escapeHtml(e.source_ip)}</td>
-                  <td><span class="badge ${e.status < 300 ? 'badge-success' : e.status < 500 ? 'badge-warning' : 'badge-danger'} badge-sm">${e.status}</span></td>
+                  <td><span class="badge ${e.status < 300 ? 'badge-success' : e.status < 500 ? 'badge-warning' : 'badge-danger'} badge-sm">${escapeHtml(String(e.status))}</span></td>
                 </tr>
               `).join('') || '<tr><td colspan="6" style="color: var(--color-text-muted);">No entries</td></tr>'}
             </tbody>

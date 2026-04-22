@@ -246,16 +246,16 @@ export class FirewallPage extends Component<{
                 return `
                 <tr>
                   <td style="color: var(--color-text-muted);">${idx + 1}</td>
-                  <td><strong>${rule.name}</strong></td>
-                  <td>${rule.direction}</td>
-                  <td style="text-transform: uppercase;">${rule.protocol}</td>
-                  <td class="mono">${rule.src_ip || 'any'}</td>
-                  <td class="mono">${rule.src_port || 'any'}</td>
-                  <td class="mono">${rule.dst_ip || 'any'}</td>
-                  <td class="mono">${rule.dst_port || 'any'}</td>
+                  <td><strong>${escapeHtml(rule.name)}</strong></td>
+                  <td>${escapeHtml(rule.direction)}</td>
+                  <td style="text-transform: uppercase;">${escapeHtml(rule.protocol)}</td>
+                  <td class="mono">${escapeHtml(rule.src_ip || 'any')}</td>
+                  <td class="mono">${escapeHtml(rule.src_port || 'any')}</td>
+                  <td class="mono">${escapeHtml(rule.dst_ip || 'any')}</td>
+                  <td class="mono">${escapeHtml(rule.dst_port || 'any')}</td>
                   <td>
                     <span class="badge ${rule.action === 'accept' ? 'badge-success' : rule.action === 'drop' ? 'badge-danger' : rule.action === 'reject' ? 'badge-warning' : 'badge-info'} badge-sm">
-                      ${rule.action === 'accept' ? 'allow' : rule.action}
+                      ${escapeHtml(rule.action === 'accept' ? 'allow' : rule.action)}
                     </span>
                   </td>
                   <td class="mono">${c.packets.toLocaleString()}</td>

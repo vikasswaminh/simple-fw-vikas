@@ -55,9 +55,12 @@ export function openModal(options: ModalOptions): HTMLElement {
     if (e.target === overlay) closeModal();
   });
 
-  // Close button
-  const closeBtn = overlay.querySelector('.modal-close');
-  closeBtn?.addEventListener('click', () => closeModal());
+  // Close button (header X) + any element in the modal with
+  // data-modal-close (lets callers wire Cancel buttons without inline onclick,
+  // which would be blocked by a strict CSP).
+  overlay.querySelectorAll('.modal-close, [data-modal-close]').forEach((el) => {
+    el.addEventListener('click', () => closeModal());
+  });
 
   // Submit handler
   if (options.onSubmit) {

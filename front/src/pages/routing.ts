@@ -70,7 +70,7 @@ export class RoutingPage extends Component<{
         <div class="form-group"><label class="form-label">Network Prefix</label><input type="text" class="form-input" id="net-prefix" placeholder="192.168.1.0/24"></div>
         <div class="form-group"><label class="form-label">Area</label><input type="number" class="form-input" id="net-area" value="0" min="0"></div>
       `,
-      footer: `<button class="btn btn-secondary" onclick="document.querySelector('.modal-close')?.click()">Cancel</button><button class="btn btn-primary" data-modal-submit>Add</button>`,
+      footer: `<button class="btn btn-secondary" data-modal-close>Cancel</button><button class="btn btn-primary" data-modal-submit>Add</button>`,
       onSubmit: async () => {
         const modal = document.querySelector('.modal');
         if (!modal) return;

@@ -24,7 +24,12 @@ async fn security_headers_middleware(
     headers.insert(
         header::CONTENT_SECURITY_POLICY,
         HeaderValue::from_static(
-            "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' wss: ws:; font-src 'self'"
+            // script-src is strict (no 'unsafe-inline'): any XSS reflected
+            // into the SPA can't execute. style-src keeps 'unsafe-inline'
+            // because index.html has a critical-CSS <style> block. Tightened
+            // with object-src 'none', base-uri 'self', form-action 'self',
+            // frame-ancestors 'none' to block plugin/base/clickjacking abuse.
+            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' wss: ws:; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
         ),
     );
     headers.insert(

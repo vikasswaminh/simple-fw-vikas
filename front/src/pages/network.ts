@@ -83,7 +83,7 @@ export class NetworkPage extends Component<{
           </div>
         `,
         footer: `
-          <button class="btn btn-secondary" onclick="document.querySelector('.modal-close')?.click()">Cancel</button>
+          <button class="btn btn-secondary" data-modal-close>Cancel</button>
           <button class="btn btn-primary" data-modal-submit>Save</button>
         `,
         onSubmit: async () => {
@@ -167,9 +167,9 @@ export class NetworkPage extends Component<{
           <tbody>
             ${interfaces.map((iface: Interface) => `
               <tr>
-                <td><strong>${iface.name}</strong></td>
+                <td><strong>${escapeHtml(iface.name)}</strong></td>
                 <td>
-                  <select class="form-select" style="width: 90px; padding: 4px 8px;" data-iface="${iface.name}">
+                  <select class="form-select" style="width: 90px; padding: 4px 8px;" data-iface="${escapeHtml(iface.name)}">
                     <option value="" ${!iface.role || iface.role === 'unset' ? 'selected' : ''}>None</option>
                     <option value="wan" ${iface.role === 'wan' ? 'selected' : ''}>WAN</option>
                     <option value="lan" ${iface.role === 'lan' ? 'selected' : ''}>LAN</option>
@@ -182,8 +182,8 @@ export class NetworkPage extends Component<{
                     <span class="toggle-track"></span>
                   </label>
                 </td>
-                <td class="mono">${iface.ipv4_addrs?.[0] || '—'}</td>
-                <td class="mono">${iface.mac || '—'}</td>
+                <td class="mono">${escapeHtml(iface.ipv4_addrs?.[0] || '—')}</td>
+                <td class="mono">${escapeHtml(iface.mac || '—')}</td>
                 <td class="mono">${formatBytes(iface.rx_bytes || 0)}</td>
                 <td class="mono">${formatBytes(iface.tx_bytes || 0)}</td>
               </tr>
@@ -233,7 +233,7 @@ export class NetworkPage extends Component<{
                 <td class="mono">${escapeHtml(e.ip)}</td>
                 <td class="mono">${escapeHtml(e.mac)}</td>
                 <td>${escapeHtml(e.interface)}</td>
-                <td><span class="badge ${e.state === 'REACHABLE' ? 'badge-success' : e.state === 'STALE' ? 'badge-outline' : 'badge-warning'} badge-sm">${e.state}</span></td>
+                <td><span class="badge ${e.state === 'REACHABLE' ? 'badge-success' : e.state === 'STALE' ? 'badge-outline' : 'badge-warning'} badge-sm">${escapeHtml(e.state)}</span></td>
               </tr>
             `).join('') : '<tr><td colspan="4" style="color: var(--color-text-muted);">No ARP entries. Click Refresh to load.</td></tr>'}
           </tbody>

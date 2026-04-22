@@ -100,7 +100,7 @@ export class SettingsPage extends Component<{
       <div style="max-width: 500px;">
         <h4 style="margin-bottom: var(--spacing-md);">General</h4>
         <form id="general-form">
-          <div class="form-group"><label class="form-label">Hostname</label><input type="text" name="hostname" class="form-input" value="${s?.hostname || ''}"></div>
+          <div class="form-group"><label class="form-label">Hostname</label><input type="text" name="hostname" class="form-input" value="${escapeHtml(String(s?.hostname || ''))}"></div>
           <div class="form-group"><label class="form-label">Timezone</label>
             <select name="timezone" class="form-select">
               ${['UTC','America/New_York','America/Chicago','America/Denver','America/Los_Angeles','Europe/London','Europe/Berlin','Asia/Tokyo','Asia/Kolkata','Australia/Sydney'].map(tz =>
@@ -191,8 +191,8 @@ export class SettingsPage extends Component<{
           <thead><tr><th>Name</th><th>Size</th><th></th></tr></thead>
           <tbody>
             ${backups.map(b => `
-              <tr><td>${b.name}</td><td>${this.fmtBytes(b.size)}</td>
-              <td><button class="btn btn-secondary btn-sm">Restore</button></td></tr>
+              <tr><td>${escapeHtml(b.name)}</td><td>${this.fmtBytes(b.size)}</td>
+              <td><button class="btn btn-secondary btn-sm" data-restore="${escapeHtml(b.name)}">Restore</button></td></tr>
             `).join('') || '<tr><td colspan="3" style="color: var(--color-text-muted);">No backups</td></tr>'}
           </tbody>
         </table>

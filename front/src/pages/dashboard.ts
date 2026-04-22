@@ -145,13 +145,13 @@ export class DashboardPage extends Component<{
         ${interfaces.slice(0, 4).map((iface: Interface) => `
           <div class="iface-card">
             <div class="iface-header">
-              <span class="iface-name">${iface.name}</span>
+              <span class="iface-name">${escapeHtml(iface.name)}</span>
               <span class="badge ${iface.link_up ? 'badge-success' : 'badge-danger'} badge-sm">
                 ${iface.link_up ? 'up' : 'down'}
               </span>
             </div>
             <div class="iface-meta">
-              ${iface.role ? iface.role.toUpperCase() : 'None'} — ${iface.ipv4_addrs?.[0] || '—'}
+              ${escapeHtml(iface.role ? iface.role.toUpperCase() : 'None')} — ${escapeHtml(iface.ipv4_addrs?.[0] || '—')}
             </div>
             <div class="iface-meta">
               RX/TX &nbsp;
@@ -168,8 +168,8 @@ export class DashboardPage extends Component<{
         <div class="card">
           <div class="card-title"><span class="icon">ℹ</span> System Info</div>
           <div style="margin-top: var(--spacing-md);">
-            <div class="kv-row"><span class="kv-label">Hostname</span><span class="kv-value">${si.hostname}</span></div>
-            <div class="kv-row"><span class="kv-label">Version</span><span class="kv-value">${si.version}</span></div>
+            <div class="kv-row"><span class="kv-label">Hostname</span><span class="kv-value">${escapeHtml(si.hostname)}</span></div>
+            <div class="kv-row"><span class="kv-label">Version</span><span class="kv-value">${escapeHtml(si.version)}</span></div>
             <div class="kv-row"><span class="kv-label">Uptime</span><span class="kv-value">${formatUptime(si.uptime_seconds)}</span></div>
             <div class="kv-row">
               <span class="kv-label">CPU</span>
