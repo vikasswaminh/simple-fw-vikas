@@ -228,6 +228,12 @@ pub async fn basic_auth_middleware(
         if needs_change && !is_auth_path(&path) {
             return Err(forced_password_change_response());
         }
+        // CSRF: require X-CSRF-Token header to match quickfw_csrf cookie on
+        // state-changing requests. Exempt the bootstrap /api/auth/* paths
+        // (client doesn't have the cookie yet on first login).
+        if !csrf_check(&request, &path) {
+            return Err(forbidden_response("CSRF token missing or invalid"));
+        }
         request.extensions_mut().insert(AuthUser(user));
         return Ok(next.run(request).await);
     }
@@ -329,6 +335,63 @@ fn forced_password_change_response() -> Response {
 
 fn is_auth_path(path: &str) -> bool {
     path == "/api/auth/password" || path == "/api/auth/ws-token"
+}
+
+/// CSRF double-submit check.
+///
+/// Returns true (check passes) when:
+///   - method is safe (GET/HEAD/OPTIONS) — CSRF irrelevant
+///   - path is a bootstrap auth endpoint (client has no CSRF cookie yet)
+///   - X-CSRF-Token header matches the quickfw_csrf cookie value
+fn csrf_check(request: &Request, path: &str) -> bool {
+    let method = request.method();
+    if method == http::Method::GET
+        || method == http::Method::HEAD
+        || method == http::Method::OPTIONS
+    {
+        return true;
+    }
+
+    // Bootstrap paths: the client cannot have the CSRF cookie before the
+    // first successful login/password-change. SameSite=Strict on the session
+    // cookie already blocks cross-site POSTs to these endpoints.
+    if path == "/api/auth/login"
+        || path == "/api/auth/password"
+        || path == "/api/auth/logout"
+    {
+        return true;
+    }
+
+    let cookie_header = match request.headers().get(header::COOKIE).and_then(|v| v.to_str().ok()) {
+        Some(h) => h,
+        None => return false,
+    };
+    let cookie_token = cookie_header
+        .split(';')
+        .filter_map(|c| c.trim().strip_prefix("quickfw_csrf="))
+        .next()
+        .unwrap_or("");
+
+    let header_token = request
+        .headers()
+        .get("x-csrf-token")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+
+    if cookie_token.is_empty() || header_token.is_empty() {
+        return false;
+    }
+    use subtle::ConstantTimeEq;
+    cookie_token.as_bytes().ct_eq(header_token.as_bytes()).into()
+}
+
+fn forbidden_response(reason: &str) -> Response {
+    let body = serde_json::json!({"error": "forbidden", "message": reason});
+    Response::builder()
+        .status(StatusCode::FORBIDDEN)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(axum::body::Body::from(body.to_string()))
+        .unwrap_or_else(|_| Response::new(axum::body::Body::from("Forbidden")))
 }
 
 // --- Session helpers ---
@@ -555,18 +618,49 @@ async fn login(
     }
 
     let token = create_session(&payload.username);
-    let cookie = format!(
+    let session_cookie = format!(
         "quickfw_session={}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age={}",
         token, SESSION_MAX_AGE
     );
 
+    // Double-submit CSRF cookie. NOT HttpOnly — the SPA's API client reads
+    // it via document.cookie and echoes it as the X-CSRF-Token header on
+    // every mutating request. See csrf_check() in the auth middleware.
+    //
+    // SameSite=Lax (not Strict) because Chromium occasionally refuses to
+    // send a Strict cookie on subresource fetches after a same-page login
+    // when the cookie was set by that same fetch response. Lax still blocks
+    // cross-site POSTs (the only relevant CSRF vector), and the session
+    // cookie itself stays Strict.
+    let csrf_token = generate_random_token();
+    let csrf_cookie = format!(
+        "quickfw_csrf={}; Secure; SameSite=Lax; Path=/; Max-Age={}",
+        csrf_token, SESSION_MAX_AGE
+    );
+
+    // Build headers manually: the `[(K, V), (K, V)]` array form uses
+    // HeaderMap::insert which OVERWRITES duplicate keys — so we'd lose one
+    // of the two Set-Cookie values. HeaderMap::append keeps both.
+    let mut headers = axum::http::HeaderMap::new();
+    headers.append(header::SET_COOKIE, session_cookie.parse().unwrap());
+    headers.append(header::SET_COOKIE, csrf_cookie.parse().unwrap());
+
     Ok((
-        [(header::SET_COOKIE, cookie)],
+        headers,
         Json(LoginResponse {
             token,
             expires_in_seconds: SESSION_MAX_AGE,
         }),
     ))
+}
+
+/// 32-byte URL-safe random token used for CSRF cookies.
+fn generate_random_token() -> String {
+    use rand::Rng;
+    let mut rng = OsRng;
+    let bytes: [u8; 32] = rng.gen();
+    // Hex encoding — safe for cookie values and predictable length (64 chars)
+    bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
 async fn logout(request: Request) -> impl IntoResponse {
@@ -582,13 +676,16 @@ async fn logout(request: Request) -> impl IntoResponse {
         }
     }
 
-    let clear_cookie =
+    let clear_session =
         "quickfw_session=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0".to_string();
+    let clear_csrf =
+        "quickfw_csrf=; Secure; SameSite=Lax; Path=/; Max-Age=0".to_string();
 
-    (
-        [(header::SET_COOKIE, clear_cookie)],
-        Json(serde_json::json!({"message": "Logged out"})),
-    )
+    let mut headers = axum::http::HeaderMap::new();
+    headers.append(header::SET_COOKIE, clear_session.parse().unwrap());
+    headers.append(header::SET_COOKIE, clear_csrf.parse().unwrap());
+
+    (headers, Json(serde_json::json!({"message": "Logged out"})))
 }
 
 #[derive(Deserialize)]

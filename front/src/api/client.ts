@@ -6,6 +6,17 @@ import { z } from 'zod';
 // producing "Unexpected token '<'" on JSON.parse in the dashboard.
 const API_BASE = '';
 
+/** Read a cookie value from document.cookie (browser-only). */
+function readCookie(name: string): string | null {
+  if (typeof document === 'undefined') return null;
+  const needle = `${name}=`;
+  for (const part of document.cookie.split(';')) {
+    const trimmed = part.trim();
+    if (trimmed.startsWith(needle)) return trimmed.slice(needle.length);
+  }
+  return null;
+}
+
 interface ApiError {
   status: number;
   message: string;
@@ -43,10 +54,22 @@ class ApiClient {
   ): Promise<T> {
     const url = `${this.baseUrl}${endpoint}`;
 
+    // Double-submit CSRF: read the non-HttpOnly quickfw_csrf cookie set on
+    // login, send it back as X-CSRF-Token on every mutating request. The
+    // backend verifies header == cookie (see auth.rs csrf_check).
+    const method = (options.method || 'GET').toUpperCase();
+    const mutating = method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS';
+    const extraHeaders: Record<string, string> = {};
+    if (mutating) {
+      const csrf = readCookie('quickfw_csrf');
+      if (csrf) extraHeaders['X-CSRF-Token'] = csrf;
+    }
+
     const response = await fetch(url, {
       ...options,
       headers: {
         ...this.defaultHeaders,
+        ...extraHeaders,
         ...options.headers,
       },
     });
