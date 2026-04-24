@@ -8,6 +8,7 @@ members = [
   "quickfw-api",
   "quickfw-cli",
   "quickfw-setup",
+  "quickfw-upgrade",
 ]
 
 [workspace.dependencies]

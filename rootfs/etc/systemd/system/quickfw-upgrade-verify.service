@@ -1,0 +1,21 @@
+[Unit]
+# Post-boot upgrade watchdog (Phase H).
+# Runs 5 minutes after boot completes. If /persist/etc/quickfw/.upgrade-pending
+# is present AND quickfw-api is active, clears the marker. If pending is present
+# but quickfw-api is NOT active, flips GRUB back to the other slot and reboots.
+# Nothing to do when no pending marker exists.
+Description=QuickFW A/B upgrade verify / rollback watchdog
+After=quickfw-api.service
+ConditionPathExists=/persist/etc/quickfw/.upgrade-pending
+
+[Service]
+Type=oneshot
+# Wait 5 minutes so the new boot has time to start services and demonstrate
+# health before we "seal" the upgrade.
+ExecStartPre=/bin/sleep 300
+ExecStart=/usr/local/bin/quickfw-upgrade mark-good
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
