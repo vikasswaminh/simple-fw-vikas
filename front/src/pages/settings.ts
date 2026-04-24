@@ -1,5 +1,5 @@
 import { Component } from '@components/component';
-import { systemApi, configApi, toolsApi, authApi, usersApi } from '@api/endpoints';
+import { systemApi, configApi, toolsApi, authApi, usersApi, firmwareApi } from '@api/endpoints';
 import type { UserDto } from '@api/endpoints';
 import { showToast } from '@components/toast';
 import { openModal, closeModal } from '@components/modal';
@@ -13,13 +13,17 @@ export class SettingsPage extends Component<{
   usersError: string | null;
   loading: boolean;
   error: string | null;
-  activeTab: 'general' | 'dns' | 'ntp' | 'backup' | 'admin' | 'syslog' | 'system';
+  activeTab: 'general' | 'dns' | 'ntp' | 'backup' | 'admin' | 'syslog' | 'system' | 'firmware';
+  firmwareStatus: string;
+  firmwareUploading: boolean;
+  firmwareResult: string | null;
 }> {
   constructor(element: HTMLElement | string) {
     super(element);
     this.state = {
       settings: null, backups: [], ntpStatus: null,
       users: [], usersError: null,
+      firmwareStatus: '', firmwareUploading: false, firmwareResult: null,
       loading: true, error: null, activeTab: 'general',
     };
   }
@@ -61,7 +65,7 @@ export class SettingsPage extends Component<{
 
       <div class="card">
         <div class="tab-bar" style="flex-wrap: wrap;">
-          ${['general', 'dns', 'ntp', 'backup', 'admin', 'syslog', 'system'].map(t =>
+          ${['general', 'dns', 'ntp', 'backup', 'admin', 'syslog', 'firmware', 'system'].map(t =>
             `<button class="tab-btn ${activeTab === t ? 'active' : ''}" data-tab="${t}">${this.tabLabel(t)}</button>`
           ).join('')}
         </div>
@@ -74,6 +78,7 @@ export class SettingsPage extends Component<{
         ${activeTab === 'backup' ? this.renderBackup() : ''}
         ${activeTab === 'admin' ? this.renderAdmin() : ''}
         ${activeTab === 'syslog' ? this.renderSyslog() : ''}
+        ${activeTab === 'firmware' ? this.renderFirmware() : ''}
         ${activeTab === 'system' ? this.renderSystem() : ''}
       </div>
     `;
@@ -84,6 +89,7 @@ export class SettingsPage extends Component<{
         this.setState({ activeTab: tab, error: null });
         if (tab === 'ntp') this.loadNtp();
         if (tab === 'admin') this.loadUsers();
+        if (tab === 'firmware') this.loadFirmwareStatus();
       });
     });
 
@@ -93,6 +99,7 @@ export class SettingsPage extends Component<{
     if (activeTab === 'backup') this.bindBackupTab();
     if (activeTab === 'dns') this.bindDnsTab();
     if (activeTab === 'system') this.bindSystemTab();
+    if (activeTab === 'firmware') this.bindFirmwareTab();
   }
 
   private bindBackupTab(): void {
@@ -242,7 +249,8 @@ export class SettingsPage extends Component<{
   private tabLabel(t: string): string {
     const map: Record<string, string> = {
       general: 'General', dns: 'DNS', ntp: 'NTP', backup: 'Backup',
-      admin: 'Admin & Users', syslog: 'Syslog', system: 'System',
+      admin: 'Admin & Users', syslog: 'Syslog',
+      firmware: 'Firmware', system: 'System',
     };
     return map[t] || t;
   }
@@ -553,5 +561,92 @@ export class SettingsPage extends Component<{
     const u = ['B', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(b) / Math.log(1024));
     return `${(b / Math.pow(1024, i)).toFixed(1)} ${u[i]}`;
+  }
+
+  // ---- Firmware (Phase I) ----
+
+  private renderFirmware(): string {
+    const { firmwareStatus, firmwareUploading, firmwareResult } = this.state;
+    return `
+      <div>
+        <h4 style="margin-bottom: var(--spacing-md);">A/B Slot Status</h4>
+        <pre class="mono" style="background: var(--color-bg-subtle); padding: var(--spacing-md); border-radius: var(--radius-sm); font-size: var(--font-size-sm); margin-bottom: var(--spacing-lg); white-space: pre-wrap;">${escapeHtml(firmwareStatus || '(loading…)')}</pre>
+
+        <h4 style="margin-bottom: var(--spacing-md);">Apply Firmware ISO</h4>
+        <p style="color: var(--color-text-secondary); font-size: var(--font-size-sm); margin-bottom: var(--spacing-md);">
+          Upload a signed QuickFW ISO. On apply, the signature is verified, the
+          ISO is written to the standby slot, and GRUB is flipped to boot into
+          it on next reboot. The watchdog will roll back automatically if the
+          new slot's quickfw-api fails to come up.
+        </p>
+        <div style="display: flex; gap: var(--spacing-sm); align-items: center;">
+          <input type="file" id="firmware-file" accept=".iso" class="form-input" ${firmwareUploading ? 'disabled' : ''}>
+          <button class="btn btn-primary" id="firmware-apply-btn" ${firmwareUploading ? 'disabled' : ''}>${firmwareUploading ? 'Uploading…' : 'Apply Upgrade'}</button>
+        </div>
+        ${firmwareResult ? `
+          <h4 style="margin: var(--spacing-lg) 0 var(--spacing-sm);">Last Upgrade Result</h4>
+          <pre class="mono" style="background: var(--color-bg-subtle); padding: var(--spacing-md); border-radius: var(--radius-sm); font-size: var(--font-size-sm); white-space: pre-wrap; max-height: 40vh; overflow: auto;">${escapeHtml(firmwareResult)}</pre>
+          <p style="color: var(--color-text-muted); font-size: var(--font-size-xs); margin-top: var(--spacing-sm);">
+            Reboot from the System tab when ready. The new slot will boot next;
+            if it fails to start quickfw-api within 5 minutes, the appliance
+            automatically rolls back.
+          </p>
+        ` : ''}
+      </div>
+    `;
+  }
+
+  private async loadFirmwareStatus(): Promise<void> {
+    try {
+      const r = await firmwareApi.status();
+      const lines = [r.stdout, r.stderr].filter(Boolean).join('\n');
+      this.setState({ firmwareStatus: lines || '(no status)' });
+    } catch {
+      this.setState({ firmwareStatus: 'Only admins can view firmware status.' });
+    }
+  }
+
+  private bindFirmwareTab(): void {
+    this.$<HTMLButtonElement>('#firmware-apply-btn')?.addEventListener('click', () => this.applyFirmware());
+  }
+
+  private async applyFirmware(): Promise<void> {
+    const input = this.$<HTMLInputElement>('#firmware-file');
+    const file = input?.files?.[0];
+    if (!file) { showToast('Choose an ISO file first', 'error'); return; }
+    if (!file.name.toLowerCase().endsWith('.iso')) {
+      showToast('File must be a .iso', 'error');
+      return;
+    }
+
+    // Re-auth confirm so an idle session can't flash firmware.
+    this.openConfirmModal({
+      title: `Apply firmware: ${file.name}`,
+      message: `This will verify the ISO signature, write it to the standby slot, and flip GRUB. The appliance WILL reboot into the new slot shortly — the watchdog rolls back automatically if the new slot fails health checks.`,
+      confirmLabel: 'Apply',
+      onConfirm: async () => {
+        // We intentionally don't pass the password to firmwareApi — the
+        // re-auth was to confirm user intent. The backend is already
+        // gated by require_role(Admin).
+        this.setState({ firmwareUploading: true, firmwareResult: null });
+        try {
+          const result = await firmwareApi.upload(file);
+          this.setState({
+            firmwareUploading: false,
+            firmwareResult: `Exit: ${result.apply_exit}\n\nSTDOUT:\n${result.apply_stdout}\n\nSTDERR:\n${result.apply_stderr}`,
+          });
+          this.loadFirmwareStatus();
+        } catch (e) {
+          this.setState({
+            firmwareUploading: false,
+            firmwareResult: `Upload/apply failed: ${e instanceof Error ? e.message : String(e)}`,
+          });
+          throw e; // let the confirm modal toast the failure
+        }
+        return { ok: true };
+      },
+      successMsg: 'Firmware uploaded and verified — reboot from System tab when ready',
+      failMsg: 'Firmware apply failed (see result below)',
+    });
   }
 }

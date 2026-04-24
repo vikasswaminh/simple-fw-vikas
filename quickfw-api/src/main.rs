@@ -76,6 +76,7 @@ async fn create_router() -> Router {
         .merge(quickfw_api::tools::create_router())
         .merge(quickfw_api::users_api::create_router())
         .merge(quickfw_api::logs_api::create_router())
+        .merge(quickfw_api::firmware_api::create_router())
         .layer(DefaultBodyLimit::max(1_048_576)) // 1MB global body limit
         .layer(middleware::from_fn(quickfw_api::audit::audit_middleware)) // inside auth (sees AuthUser)
         .layer(middleware::from_fn(quickfw_api::auth::basic_auth_middleware))

@@ -152,6 +152,37 @@ export const logsApi = {
 };
 
 /**
+ * Firmware upgrade (Phase I — admin-only).
+ *
+ * `upload` sends the raw ISO bytes as the request body with
+ * Content-Type: application/octet-stream. The API client's post() always
+ * JSON-stringifies its body, so we hit fetch() directly here.
+ */
+export const firmwareApi = {
+  status: () => api.get<{ available: boolean; exit?: number; stdout?: string; stderr?: string }>('/api/system/upgrade-status'),
+  upload: async (file: File): Promise<{ apply_exit: number; apply_stdout: string; apply_stderr: string }> => {
+    const csrf = typeof document !== 'undefined'
+      ? (document.cookie.split(';').map(p => p.trim()).find(p => p.startsWith('quickfw_csrf='))?.slice('quickfw_csrf='.length) || '')
+      : '';
+    const r = await fetch('/api/system/firmware-upload', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/octet-stream', 'X-CSRF-Token': csrf },
+      body: file,
+    });
+    const body = await r.json() as { apply_exit?: number; apply_stdout?: string; apply_stderr?: string; error?: string };
+    if (!r.ok) {
+      throw new Error(body.error || `HTTP ${r.status}`);
+    }
+    return {
+      apply_exit: body.apply_exit ?? -1,
+      apply_stdout: body.apply_stdout ?? '',
+      apply_stderr: body.apply_stderr ?? '',
+    };
+  },
+};
+
+/**
  * Tools API endpoints
  */
 export const toolsApi = {

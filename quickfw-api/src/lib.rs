@@ -3,6 +3,7 @@ pub mod audit;
 pub mod config_utils;
 pub mod file;
 pub mod firewall_api;
+pub mod firmware_api;
 pub mod logger;
 pub mod logs_api;
 pub mod migrations;
