@@ -160,6 +160,11 @@ export class NetworkPage extends Component<{
 
     // ARP flush (only rendered on ARP tab).
     this.$<HTMLButtonElement>('#flush-arp-btn')?.addEventListener('click', () => this.flushArp());
+
+    // Per-interface Configure modal.
+    this.$$<HTMLButtonElement>('[data-configure-iface]').forEach(btn => {
+      btn.addEventListener('click', () => this.openConfigureInterfaceModal(btn.dataset.configureIface!));
+    });
   }
 
   private async setInterfaceRole(name: string, role: string): Promise<void> {
@@ -212,6 +217,7 @@ export class NetworkPage extends Component<{
               <th>MAC</th>
               <th>RX</th>
               <th>TX</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
@@ -236,12 +242,105 @@ export class NetworkPage extends Component<{
                 <td class="mono">${escapeHtml(iface.mac || '—')}</td>
                 <td class="mono">${formatBytes(iface.rx_bytes || 0)}</td>
                 <td class="mono">${formatBytes(iface.tx_bytes || 0)}</td>
+                <td>
+                  <button class="btn btn-secondary btn-sm" data-configure-iface="${escapeHtml(iface.name)}" title="Configure ${escapeHtml(iface.name)}">Configure</button>
+                </td>
               </tr>
             `).join('')}
           </tbody>
         </table>
       </div>
     `;
+  }
+
+  private openConfigureInterfaceModal(name: string): void {
+    const iface = this.state.interfaces.find(i => i.name === name);
+    if (!iface) return;
+
+    // Derive initial mode from current IP: if there's an IPv4 address, default
+    // to "static" (safer — the user can switch to dhcp explicitly); otherwise
+    // "" (no change). The backend treats "" as "don't touch addressing".
+    const currentIp = iface.ipv4_addrs?.[0] || '';
+    const initialMode = currentIp ? 'static' : '';
+
+    openModal({
+      title: `Configure ${name}`,
+      size: 'lg',
+      body: `
+        <div class="grid-2">
+          <div class="form-group"><label class="form-label">Mode</label>
+            <select class="form-select" id="if-mode">
+              <option value="" ${initialMode === '' ? 'selected' : ''}>(no change)</option>
+              <option value="dhcp" ${initialMode === 'dhcp' ? 'selected' : ''}>DHCP</option>
+              <option value="static" ${initialMode === 'static' ? 'selected' : ''}>Static</option>
+            </select>
+          </div>
+          <div class="form-group"><label class="form-label">Enabled</label>
+            <div style="padding-top: 6px;">
+              <label class="toggle"><input type="checkbox" id="if-enabled" ${iface.link_up ? 'checked' : ''}><span class="toggle-track"></span></label>
+              <span style="font-size: var(--font-size-sm); margin-left: var(--spacing-sm);">Bring link up</span>
+            </div>
+          </div>
+        </div>
+        <div class="grid-2" id="if-static-fields">
+          <div class="form-group"><label class="form-label">IPv4 Address (CIDR)</label><input type="text" class="form-input" id="if-address" placeholder="192.168.1.1/24" value="${escapeHtml(currentIp)}"></div>
+          <div class="form-group"><label class="form-label">Gateway</label><input type="text" class="form-input" id="if-gateway" placeholder="192.168.1.254"></div>
+        </div>
+        <div class="form-group" id="if-dns-group">
+          <label class="form-label">DNS Servers (comma-separated)</label>
+          <input type="text" class="form-input" id="if-dns" placeholder="1.1.1.1, 8.8.8.8">
+        </div>
+        <div class="grid-2">
+          <div class="form-group"><label class="form-label">MTU</label><input type="number" class="form-input" id="if-mtu" value="${iface.mtu}" min="68" max="9000"></div>
+          <div class="form-group"><label class="form-label">Description</label><input type="text" class="form-input" id="if-desc" maxlength="128" value="${escapeHtml(iface.description ?? '')}"></div>
+        </div>
+      `,
+      footer: `<button class="btn btn-secondary" data-modal-close>Cancel</button><button class="btn btn-primary" data-modal-submit>Apply</button>`,
+      onSubmit: async () => {
+        const modal = document.querySelector('.modal');
+        if (!modal) return;
+        const get = (id: string) => (modal.querySelector(`#${id}`) as HTMLInputElement)?.value.trim() ?? '';
+        const getChecked = (id: string) => (modal.querySelector(`#${id}`) as HTMLInputElement)?.checked ?? false;
+
+        const mode = get('if-mode');
+        const address = get('if-address');
+        const gateway = get('if-gateway');
+        const dnsRaw = get('if-dns');
+        const dns = dnsRaw ? dnsRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
+        const mtuStr = get('if-mtu');
+        const mtu = mtuStr ? parseInt(mtuStr) : undefined;
+        const description = get('if-desc');
+        const enabled = getChecked('if-enabled');
+
+        // Light client-side validation — backend re-validates authoritatively.
+        if (mode === 'static' && address && !/^\d{1,3}(\.\d{1,3}){3}\/\d{1,2}$/.test(address)) {
+          showToast('Address must be CIDR (e.g. 192.168.1.1/24)', 'error');
+          return;
+        }
+        if (mtu !== undefined && (isNaN(mtu) || mtu < 68 || mtu > 9000)) {
+          showToast('MTU must be 68-9000', 'error');
+          return;
+        }
+
+        try {
+          await networkApi.configure({
+            name,
+            mode: mode as '' | 'dhcp' | 'static',
+            address: address || undefined,
+            gateway: gateway || undefined,
+            dns: dns.length ? dns : undefined,
+            mtu,
+            description: description || undefined,
+            enabled,
+          });
+          showToast(`${name} configured`, 'success');
+          closeModal();
+          this.loadInterfaces();
+        } catch {
+          showToast(`Failed to configure ${name}`, 'error');
+        }
+      },
+    });
   }
 
   private renderDhcp(leases: DhcpLease[]): string {
