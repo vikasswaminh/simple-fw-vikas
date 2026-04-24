@@ -5,8 +5,11 @@ use serde::{Deserialize, Serialize};
 const OSPF_CONFIG_PATH: &str = "/etc/quickfw/ospf.yaml";
 
 /// Complete OSPF configuration.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OspfConfig {
+    /// Config schema version — see io::firewall for migration notes.
+    #[serde(default = "default_ospf_schema_version")]
+    pub schema_version: String,
     #[serde(default)]
     pub enabled: bool,
     #[serde(default)]
@@ -23,6 +26,26 @@ pub struct OspfConfig {
     pub default_information_originate: bool,
     #[serde(default)]
     pub log_adjacency_changes: bool,
+}
+
+impl Default for OspfConfig {
+    fn default() -> Self {
+        Self {
+            schema_version: default_ospf_schema_version(),
+            enabled: false,
+            router_id: String::new(),
+            networks: Vec::new(),
+            areas: Vec::new(),
+            passive_interfaces: Vec::new(),
+            redistribute: Vec::new(),
+            default_information_originate: false,
+            log_adjacency_changes: false,
+        }
+    }
+}
+
+fn default_ospf_schema_version() -> String {
+    "1.0".to_string()
 }
 
 /// OSPF network statement.

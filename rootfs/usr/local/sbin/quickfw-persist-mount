@@ -1,0 +1,55 @@
+#!/bin/sh
+# QuickFW persistent-config mount helper.
+#
+# On an installed image there is a dedicated partition labelled QUICKFW_PERSIST
+# that holds /etc/quickfw and /var/log/quickfw. This script finds it (by
+# filesystem label) and bind-mounts it over the right places.
+#
+# On the live ISO (booted with toram) no such partition exists; the script
+# exits 0 silently and the dashboard surfaces a warning that config will be
+# wiped on reboot.
+#
+# Called from quickfw-persist.service before quickfw-api starts.
+
+set -eu
+
+PERSIST_DEV="/dev/disk/by-label/QUICKFW_PERSIST"
+PERSIST_MNT="/persist"
+LIVE_FILE="/persist/.no-persist"
+
+if [ ! -e "$PERSIST_DEV" ]; then
+  # No persistent partition — live ISO path. Drop a marker so the dashboard
+  # can show "ephemeral mode — config wiped on reboot".
+  mkdir -p /run/quickfw
+  echo "ephemeral" > /run/quickfw/persist-state
+  echo "quickfw-persist: no QUICKFW_PERSIST label found; running ephemeral"
+  exit 0
+fi
+
+mkdir -p "$PERSIST_MNT"
+if ! mountpoint -q "$PERSIST_MNT"; then
+  mount "$PERSIST_DEV" "$PERSIST_MNT"
+fi
+
+# First-time setup: create the per-subdir hierarchy.
+mkdir -p "$PERSIST_MNT/etc/quickfw"
+mkdir -p "$PERSIST_MNT/var/log/quickfw"
+
+# Bind-mount the persistent subtrees over the live paths. These bind-mounts
+# are additive — we keep /etc/quickfw's initial contents (TLS cert etc.)
+# visible through the new mount's empty directory the first time around,
+# so we have to seed the persist partition from the live tree once.
+if [ ! -f "$PERSIST_MNT/etc/quickfw/.seeded" ]; then
+  # copy -a preserves perms; dotglob makes sure hidden files come along
+  if [ -d /etc/quickfw ]; then
+    cp -a /etc/quickfw/. "$PERSIST_MNT/etc/quickfw/" 2>/dev/null || true
+  fi
+  touch "$PERSIST_MNT/etc/quickfw/.seeded"
+fi
+
+mount --bind "$PERSIST_MNT/etc/quickfw" /etc/quickfw
+mount --bind "$PERSIST_MNT/var/log/quickfw" /var/log/quickfw
+
+mkdir -p /run/quickfw
+echo "persistent" > /run/quickfw/persist-state
+echo "quickfw-persist: mounted $PERSIST_DEV at $PERSIST_MNT; /etc/quickfw and /var/log/quickfw are persistent"

@@ -38,6 +38,10 @@ fn is_valid_time(s: &str) -> bool {
 /// Complete firewall policy configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FirewallConfig {
+    /// Config schema version — used by the migration framework on load. Newer
+    /// binaries refuse to load configs with a version they don't understand.
+    #[serde(default = "default_schema_version")]
+    pub schema_version: String,
     #[serde(default)]
     pub rules: Vec<FirewallRule>,
     #[serde(default = "default_deny")]
@@ -53,6 +57,7 @@ pub struct FirewallConfig {
 impl Default for FirewallConfig {
     fn default() -> Self {
         Self {
+            schema_version: default_schema_version(),
             rules: Vec::new(),
             forward_policy: "drop".to_string(),
             input_policy: "drop".to_string(),
@@ -64,6 +69,10 @@ impl Default for FirewallConfig {
 
 fn default_deny() -> String {
     "drop".to_string()
+}
+
+fn default_schema_version() -> String {
+    "1.0".to_string()
 }
 
 fn default_rule_accept() -> String {

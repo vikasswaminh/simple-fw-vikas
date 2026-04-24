@@ -1,0 +1,21 @@
+[Unit]
+# Mounts the persistent-config partition over /etc/quickfw and
+# /var/log/quickfw so appliance state survives reboot on an installed
+# image. The live ISO (toram) path has no such partition; in that case
+# this unit runs `start-pre` which exits 0 silently and becomes a no-op.
+#
+# Must run before quickfw-api so the service sees the mounted config.
+Description=QuickFW persistent-config partition mount
+After=local-fs.target
+Before=quickfw-api.service
+DefaultDependencies=no
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/quickfw-persist-mount
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

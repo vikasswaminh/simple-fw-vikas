@@ -477,6 +477,7 @@ mod tests {
     fn nat_config_with_snat_roundtrip_validation() {
         // A mixed config — masquerade + port_forward + snat all valid.
         let config = gfw_io::nat::NatConfig {
+            schema_version: "1.0".to_string(),
             masquerade: vec![gfw_io::nat::MasqueradeRule {
                 out_interface: "eth0".to_string(),
                 source_cidr: "192.168.1.0/24".to_string(),

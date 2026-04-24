@@ -5,8 +5,11 @@ use serde::{Deserialize, Serialize};
 const BGP_CONFIG_PATH: &str = "/etc/quickfw/bgp.yaml";
 
 /// Complete BGP configuration.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BgpConfig {
+    /// Config schema version — see io::firewall for migration notes.
+    #[serde(default = "default_bgp_schema_version")]
+    pub schema_version: String,
     #[serde(default)]
     pub enabled: bool,
     #[serde(default)]
@@ -19,6 +22,24 @@ pub struct BgpConfig {
     pub address_families: Vec<AddressFamily>,
     #[serde(default)]
     pub redistribute: Vec<String>,
+}
+
+impl Default for BgpConfig {
+    fn default() -> Self {
+        Self {
+            schema_version: default_bgp_schema_version(),
+            enabled: false,
+            local_as: 0,
+            router_id: String::new(),
+            neighbors: Vec::new(),
+            address_families: Vec::new(),
+            redistribute: Vec::new(),
+        }
+    }
+}
+
+fn default_bgp_schema_version() -> String {
+    "1.0".to_string()
 }
 
 /// BGP neighbor configuration.
@@ -40,6 +61,25 @@ pub struct BgpNeighbor {
     pub ebgp_multihop: Option<u32>,
     #[serde(default)]
     pub update_source: Option<String>,
+}
+
+impl Default for BgpNeighbor {
+    fn default() -> Self {
+        // Keep in sync with the serde default_* functions so Rust code using
+        // `..Default::default()` produces a value that validate_bgp_config
+        // will accept (hold > keepalive).
+        Self {
+            address: String::new(),
+            remote_as: 0,
+            description: None,
+            password: None,
+            timers_keepalive: default_keepalive(),
+            timers_hold: default_hold(),
+            passive: false,
+            ebgp_multihop: None,
+            update_source: None,
+        }
+    }
 }
 
 fn default_keepalive() -> u32 { 60 }

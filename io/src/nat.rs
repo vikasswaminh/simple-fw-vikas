@@ -11,8 +11,11 @@ use tracing::{error, info};
 use crate::nfqueue::{NFT_FAMILY, NFT_TABLE};
 
 /// Top-level NAT configuration.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NatConfig {
+    /// Config schema version — see io::firewall for migration notes.
+    #[serde(default = "default_nat_schema_version")]
+    pub schema_version: String,
     /// SNAT rules (masquerade outbound traffic on WAN).
     #[serde(default)]
     pub masquerade: Vec<MasqueradeRule>,
@@ -22,6 +25,21 @@ pub struct NatConfig {
     /// Source NAT (static SNAT — translate source to specific IP).
     #[serde(default)]
     pub snat: Vec<SnatRule>,
+}
+
+impl Default for NatConfig {
+    fn default() -> Self {
+        Self {
+            schema_version: default_nat_schema_version(),
+            masquerade: Vec::new(),
+            port_forward: Vec::new(),
+            snat: Vec::new(),
+        }
+    }
+}
+
+fn default_nat_schema_version() -> String {
+    "1.0".to_string()
 }
 
 /// Masquerade rule for SNAT — translates source addresses for outbound traffic.
@@ -187,6 +205,7 @@ mod tests {
     #[test]
     fn test_generate_nat_script_masquerade() {
         let config = NatConfig {
+            schema_version: "1.0".to_string(),
             masquerade: vec![MasqueradeRule {
                 out_interface: "eth0".to_string(),
                 source_cidr: "192.168.1.0/24".to_string(),
@@ -205,6 +224,7 @@ mod tests {
     #[test]
     fn test_generate_nat_script_port_forward() {
         let config = NatConfig {
+            schema_version: "1.0".to_string(),
             masquerade: vec![],
             port_forward: vec![PortForwardRule {
                 protocol: "tcp".to_string(),
@@ -223,6 +243,7 @@ mod tests {
     #[test]
     fn test_generate_nat_script_static_snat() {
         let config = NatConfig {
+            schema_version: "1.0".to_string(),
             masquerade: vec![],
             port_forward: vec![],
             snat: vec![SnatRule {
@@ -249,6 +270,7 @@ mod tests {
     #[test]
     fn test_generate_nat_script_both() {
         let config = NatConfig {
+            schema_version: "1.0".to_string(),
             masquerade: vec![MasqueradeRule {
                 out_interface: "wan0".to_string(),
                 source_cidr: "10.0.0.0/8".to_string(),
