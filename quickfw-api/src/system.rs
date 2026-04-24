@@ -195,9 +195,42 @@ pub async fn create_router() -> Router {
 }
 
 // Simple health check – returns 200 OK if the server is running.
-async fn health_check() -> impl axum::response::IntoResponse {
-    // Could add deeper checks (e.g., connectivity to nft, DB) later.
-    (axum::http::StatusCode::OK, "OK")
+async fn health_check() -> Json<serde_json::Value> {
+    // Per-subsystem health so the dashboard can light up red dots when a
+    // dependency is down. Designed to be cheap — every check is either a
+    // path-stat or a one-shot systemctl invocation.
+    fn unit_active(unit: &str) -> bool {
+        Command::new("systemctl")
+            .args(["is-active", unit])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+    fn binary_present(name: &str) -> bool {
+        Command::new("which").arg(name).output().map(|o| o.status.success()).unwrap_or(false)
+    }
+    fn file_present(path: &str) -> bool {
+        std::path::Path::new(path).exists()
+    }
+
+    let nftables = binary_present("nft");
+    let dnsmasq = unit_active("dnsmasq");
+    let frr = unit_active("frr");
+    let config = serde_json::json!({
+        "firewall": file_present(FIREWALL_PATH),
+        "nat": file_present(NAT_PATH),
+        "settings": file_present(SETTINGS_PATH),
+        "routes": file_present(ROUTES_PATH),
+        "roles": file_present(ROLES_PATH),
+    });
+
+    Json(serde_json::json!({
+        "api": true,
+        "nftables": nftables,
+        "dnsmasq": dnsmasq,
+        "frr": frr,
+        "config": config,
+    }))
 }
 
 /// Query systemd for the live status of core appliance services.

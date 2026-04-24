@@ -141,15 +141,22 @@ fn main() {
     // ── Step 7: Admin password ──
     println!();
     println!("Step 6/{}: Set admin password (web UI)", total_steps);
-    println!("  Default: quickfw (press Enter to keep)");
+    println!("  Requirements: ≥ 12 chars, mix of upper/lower case + at least one digit.");
+    println!("  Press Enter to keep 'quickfw' default (first-boot lockdown stays active until changed).");
     let admin_password = loop {
         let pw = prompt_input_default("Admin password", "quickfw");
-        if pw.len() < 8 && pw != "quickfw" {
-            println!("  Password must be at least 8 characters.");
+        // Leaving the default keeps the appliance in first-boot lockdown — the
+        // web UI will force the admin to set a strong password on first login.
+        if pw == "quickfw" {
+            break pw;
+        }
+        if let Err(reason) = check_password_strength(&pw) {
+            println!("  {}", reason);
             continue;
         }
-        if BANNED_PASSWORDS.contains(&pw.to_lowercase().as_str()) && pw != "quickfw" {
-            println!("  This password is too common. Choose another.");
+        let confirm = prompt_input_default("Confirm password", "");
+        if confirm != pw {
+            println!("  Passwords do not match. Try again.");
             continue;
         }
         break pw;
@@ -353,6 +360,29 @@ fn prompt_yes_no(label: &str, default: bool) -> bool {
         return default;
     }
     trimmed == "y" || trimmed == "yes"
+}
+
+/// Enforce a minimum-strength policy on the admin password.
+///
+/// Rules:
+///   - ≥ 12 characters
+///   - at least one lowercase, one uppercase, one digit
+///   - not in the embedded weak-password list (case-insensitive)
+fn check_password_strength(pw: &str) -> Result<(), String> {
+    if pw.len() < 12 {
+        return Err("Password must be at least 12 characters.".to_string());
+    }
+    let has_lower = pw.chars().any(|c| c.is_ascii_lowercase());
+    let has_upper = pw.chars().any(|c| c.is_ascii_uppercase());
+    let has_digit = pw.chars().any(|c| c.is_ascii_digit());
+    if !(has_lower && has_upper && has_digit) {
+        return Err("Password needs lowercase, uppercase, AND a digit.".to_string());
+    }
+    let lower = pw.to_lowercase();
+    if BANNED_PASSWORDS.iter().any(|&b| lower == b || lower.contains(b)) {
+        return Err("Password contains a common/weak phrase. Choose another.".to_string());
+    }
+    Ok(())
 }
 
 fn prompt_password(label: &str) -> String {
