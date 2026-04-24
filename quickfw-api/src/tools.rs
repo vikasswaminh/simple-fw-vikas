@@ -24,6 +24,7 @@ const DNS_LOCAL_PATH: &str = "/etc/dnsmasq.d/quickfw-local.conf";
 pub fn create_router() -> Router {
     Router::new()
         .route("/api/tools/arp", get(get_arp_table))
+        .route("/api/tools/arp/flush", post(flush_arp_table))
         .route("/api/tools/dhcp-leases", get(get_dhcp_leases))
         .route("/api/tools/dns-local", get(get_dns_local))
         .route("/api/tools/dns-local", post(save_dns_local))
@@ -105,6 +106,26 @@ fn parse_arp_line(line: &str) -> Option<ArpEntry> {
         interface,
         state,
     })
+}
+
+async fn flush_arp_table() -> Result<Json<&'static str>, StatusCode> {
+    let output = Command::new("ip")
+        .args(["neigh", "flush", "all"])
+        .output();
+    match output {
+        Ok(o) if o.status.success() => {
+            info!("ARP table flushed");
+            Ok(Json("ARP table flushed"))
+        }
+        Ok(o) => {
+            error!("arp flush failed: {}", String::from_utf8_lossy(&o.stderr));
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+        Err(e) => {
+            error!("arp flush error: {}", e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
 }
 
 // ===================================================================

@@ -1,6 +1,7 @@
 import { Component } from '@components/component';
 import { systemApi, configApi, toolsApi, authApi } from '@api/endpoints';
 import { showToast } from '@components/toast';
+import { openModal, closeModal } from '@components/modal';
 import { escapeHtml } from '@utils';
 
 export class SettingsPage extends Component<{
@@ -84,6 +85,153 @@ export class SettingsPage extends Component<{
     // Form bindings
     if (activeTab === 'general') this.bindGeneralForm();
     if (activeTab === 'admin') this.bindAdminForm();
+    if (activeTab === 'backup') this.bindBackupTab();
+    if (activeTab === 'dns') this.bindDnsTab();
+    if (activeTab === 'system') this.bindSystemTab();
+  }
+
+  private bindBackupTab(): void {
+    this.$<HTMLButtonElement>('#download-backup-btn')?.addEventListener('click', () => this.downloadBackup());
+    this.$<HTMLButtonElement>('#import-backup-btn')?.addEventListener('click', () => this.importBackup());
+    this.$$<HTMLButtonElement>('[data-restore]').forEach(btn => {
+      btn.addEventListener('click', () => this.openRestoreModal(btn.dataset.restore!));
+    });
+  }
+
+  private async downloadBackup(): Promise<void> {
+    try {
+      const data = await configApi.export();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      a.href = url;
+      a.download = `quickfw-backup-${stamp}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast('Backup downloaded', 'success');
+    } catch { showToast('Failed to export backup', 'error'); }
+  }
+
+  private importBackup(): void {
+    const input = this.$<HTMLInputElement>('#import-file-input');
+    const file = input?.files?.[0];
+    if (!file) { showToast('Choose a backup file first', 'error'); return; }
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const parsed = JSON.parse(reader.result as string);
+        await configApi.import(parsed);
+        showToast('Backup imported', 'success');
+        this.loadData();
+      } catch { showToast('Failed to import backup (invalid JSON or server error)', 'error'); }
+    };
+    reader.onerror = () => showToast('Failed to read file', 'error');
+    reader.readAsText(file);
+  }
+
+  private openRestoreModal(name: string): void {
+    openModal({
+      title: `Restore backup: ${name}`,
+      body: `
+        <p style="color: var(--color-text-secondary); margin-bottom: var(--spacing-md);">
+          Restoring will overwrite the current configuration. Enter your admin password to confirm.
+        </p>
+        <div class="form-group"><label class="form-label">Admin Password</label><input type="password" class="form-input" id="restore-pw"></div>
+      `,
+      footer: `<button class="btn btn-secondary" data-modal-close>Cancel</button><button class="btn btn-danger" data-modal-submit>Restore</button>`,
+      onSubmit: async () => {
+        const modal = document.querySelector('.modal');
+        const pw = (modal?.querySelector('#restore-pw') as HTMLInputElement)?.value;
+        if (!pw) { showToast('Password required', 'error'); return; }
+        try {
+          await configApi.restore(name, pw);
+          showToast('Configuration restored', 'success');
+          closeModal();
+        } catch { showToast('Restore failed', 'error'); }
+      },
+    });
+  }
+
+  private bindDnsTab(): void {
+    this.$<HTMLButtonElement>('#load-dns-btn')?.addEventListener('click', () => this.openDnsOverridesModal());
+  }
+
+  private async openDnsOverridesModal(): Promise<void> {
+    try {
+      const entries = await toolsApi.getDnsLocal();
+      openModal({
+        title: 'DNS Overrides',
+        size: 'lg',
+        body: `
+          <p style="margin-bottom: var(--spacing-md); color: var(--color-text-secondary); font-size: var(--font-size-sm);">
+            Hostname-to-IP overrides served by the local DNS resolver.
+          </p>
+          <div class="table-container">
+            <table class="table">
+              <thead><tr><th>Hostname</th><th>IP</th></tr></thead>
+              <tbody>
+                ${entries.length ? entries.map(e => `<tr><td class="mono">${escapeHtml(e.hostname)}</td><td class="mono">${escapeHtml(e.ip)}</td></tr>`).join('') : '<tr><td colspan="2" style="color: var(--color-text-muted);">No entries</td></tr>'}
+              </tbody>
+            </table>
+          </div>
+          <p style="margin-top: var(--spacing-md); color: var(--color-text-muted); font-size: var(--font-size-xs);">
+            Manage entries on the Network → DNS Settings page.
+          </p>
+        `,
+        footer: '<button class="btn btn-secondary" data-modal-submit>Close</button>',
+        onSubmit: () => closeModal(),
+      });
+    } catch { showToast('Failed to load DNS overrides', 'error'); }
+  }
+
+  private bindSystemTab(): void {
+    this.$<HTMLButtonElement>('#reboot-btn')?.addEventListener('click', () => this.openConfirmModal({
+      title: 'Reboot System',
+      message: 'The appliance will restart and management traffic will be interrupted for ~60 seconds.',
+      confirmLabel: 'Reboot',
+      onConfirm: (pw) => systemApi.reboot(pw),
+      successMsg: 'Rebooting…',
+      failMsg: 'Reboot failed',
+    }));
+    this.$<HTMLButtonElement>('#factory-reset-btn')?.addEventListener('click', () => this.openConfirmModal({
+      title: 'Factory Reset',
+      message: 'This wipes firewall, NAT, routing, roles, and settings — then reboots. Admin password is preserved. This cannot be undone.',
+      confirmLabel: 'Factory Reset',
+      onConfirm: (pw) => systemApi.factoryReset(pw),
+      successMsg: 'Factory reset applied — rebooting',
+      failMsg: 'Factory reset failed',
+    }));
+  }
+
+  private openConfirmModal(opts: {
+    title: string;
+    message: string;
+    confirmLabel: string;
+    onConfirm: (password: string) => Promise<unknown>;
+    successMsg: string;
+    failMsg: string;
+  }): void {
+    openModal({
+      title: opts.title,
+      body: `
+        <p style="color: var(--color-text-secondary); margin-bottom: var(--spacing-md);">${escapeHtml(opts.message)}</p>
+        <div class="form-group"><label class="form-label">Admin Password</label><input type="password" class="form-input" id="confirm-pw"></div>
+      `,
+      footer: `<button class="btn btn-secondary" data-modal-close>Cancel</button><button class="btn btn-danger" data-modal-submit>${escapeHtml(opts.confirmLabel)}</button>`,
+      onSubmit: async () => {
+        const modal = document.querySelector('.modal');
+        const pw = (modal?.querySelector('#confirm-pw') as HTMLInputElement)?.value;
+        if (!pw) { showToast('Password required', 'error'); return; }
+        try {
+          await opts.onConfirm(pw);
+          showToast(opts.successMsg, 'success');
+          closeModal();
+        } catch { showToast(opts.failMsg, 'error'); }
+      },
+    });
   }
 
   private tabLabel(t: string): string {
@@ -175,13 +323,13 @@ export class SettingsPage extends Component<{
       <div class="grid-2">
         <div>
           <h4 style="margin-bottom: var(--spacing-md);">Export</h4>
-          <button class="btn btn-primary">Download Backup</button>
+          <button class="btn btn-primary" id="download-backup-btn">Download Backup</button>
         </div>
         <div>
           <h4 style="margin-bottom: var(--spacing-md);">Import</h4>
           <div style="display: flex; gap: var(--spacing-sm);">
-            <input type="file" accept=".json,.yaml,.yml" class="form-input">
-            <button class="btn btn-secondary">Import</button>
+            <input type="file" accept=".json,.yaml,.yml" class="form-input" id="import-file-input">
+            <button class="btn btn-secondary" id="import-backup-btn">Import</button>
           </div>
         </div>
       </div>
@@ -253,13 +401,13 @@ export class SettingsPage extends Component<{
         <div class="card" style="border-color: var(--color-danger); margin-bottom: var(--spacing-md);">
           <div style="display: flex; justify-content: space-between; align-items: center;">
             <div><strong>Reboot System</strong><p style="color: var(--color-text-secondary); font-size: var(--font-size-sm);">Temporarily interrupts connectivity.</p></div>
-            <button class="btn btn-danger">Reboot</button>
+            <button class="btn btn-danger" id="reboot-btn">Reboot</button>
           </div>
         </div>
         <div class="card" style="border-color: var(--color-danger);">
           <div style="display: flex; justify-content: space-between; align-items: center;">
             <div><strong>Factory Reset</strong><p style="color: var(--color-text-secondary); font-size: var(--font-size-sm);">Cannot be undone.</p></div>
-            <button class="btn btn-danger">Reset</button>
+            <button class="btn btn-danger" id="factory-reset-btn">Reset</button>
           </div>
         </div>
       </div>

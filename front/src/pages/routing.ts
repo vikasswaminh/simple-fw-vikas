@@ -63,14 +63,16 @@ export class RoutingPage extends Component<{
     } catch { /* ignore */ }
   }
 
-  private openAddNetworkModal(): void {
+  private openOspfNetworkModal(idx?: number): void {
+    const isEdit = typeof idx === 'number';
+    const existing = isEdit ? this.state.ospf?.networks[idx] : undefined;
     openModal({
-      title: '+ Add Network',
+      title: isEdit ? '✎ Edit Network' : '+ Add Network',
       body: `
-        <div class="form-group"><label class="form-label">Network Prefix</label><input type="text" class="form-input" id="net-prefix" placeholder="192.168.1.0/24"></div>
-        <div class="form-group"><label class="form-label">Area</label><input type="number" class="form-input" id="net-area" value="0" min="0"></div>
+        <div class="form-group"><label class="form-label">Network Prefix</label><input type="text" class="form-input" id="net-prefix" placeholder="192.168.1.0/24" value="${escapeHtml(existing?.prefix ?? '')}"></div>
+        <div class="form-group"><label class="form-label">Area</label><input type="number" class="form-input" id="net-area" value="${existing?.area ?? 0}" min="0"></div>
       `,
-      footer: `<button class="btn btn-secondary" data-modal-close>Cancel</button><button class="btn btn-primary" data-modal-submit>Add</button>`,
+      footer: `<button class="btn btn-secondary" data-modal-close>Cancel</button><button class="btn btn-primary" data-modal-submit>${isEdit ? 'Save Changes' : 'Add'}</button>`,
       onSubmit: async () => {
         const modal = document.querySelector('.modal');
         if (!modal) return;
@@ -78,15 +80,135 @@ export class RoutingPage extends Component<{
         const area = parseInt((modal.querySelector('#net-area') as HTMLInputElement)?.value || '0');
         if (!prefix) { showToast('Prefix required', 'error'); return; }
         const ospf = { ...this.state.ospf! };
-        ospf.networks = [...(ospf.networks || []), { prefix, area }];
+        const networks = [...(ospf.networks || [])];
+        if (isEdit) networks[idx] = { prefix, area }; else networks.push({ prefix, area });
+        ospf.networks = networks;
         try {
           await routingApi.saveOspfConfig(ospf);
-          showToast('Network added', 'success');
+          showToast(isEdit ? 'Network updated' : 'Network added', 'success');
           closeModal();
           this.loadData();
-        } catch { showToast('Failed to add network', 'error'); }
+        } catch { showToast(isEdit ? 'Failed to update network' : 'Failed to add network', 'error'); }
       },
     });
+  }
+
+  private async deleteOspfNetwork(idx: number): Promise<void> {
+    const ospf = { ...this.state.ospf! };
+    const networks = [...(ospf.networks || [])];
+    networks.splice(idx, 1);
+    ospf.networks = networks;
+    try {
+      await routingApi.saveOspfConfig(ospf);
+      showToast('Network removed', 'success');
+      this.loadData();
+    } catch { showToast('Failed to remove network', 'error'); }
+  }
+
+  private openBgpNeighborModal(idx?: number): void {
+    const isEdit = typeof idx === 'number';
+    const existing = isEdit ? this.state.bgp?.neighbors[idx] : undefined;
+    openModal({
+      title: isEdit ? '✎ Edit BGP Neighbor' : '+ Add BGP Neighbor',
+      body: `
+        <div class="grid-2">
+          <div class="form-group"><label class="form-label">Address</label><input type="text" class="form-input" id="bgp-address" placeholder="10.0.0.1" value="${escapeHtml(existing?.address ?? '')}"></div>
+          <div class="form-group"><label class="form-label">Remote AS</label><input type="number" class="form-input" id="bgp-as" placeholder="65001" value="${existing?.remote_as ?? ''}"></div>
+        </div>
+        <div class="form-group"><label class="form-label">Description</label><input type="text" class="form-input" id="bgp-desc" placeholder="Optional" value="${escapeHtml(existing?.description ?? '')}"></div>
+      `,
+      footer: `<button class="btn btn-secondary" data-modal-close>Cancel</button><button class="btn btn-primary" data-modal-submit>${isEdit ? 'Save Changes' : 'Add'}</button>`,
+      onSubmit: async () => {
+        const modal = document.querySelector('.modal');
+        if (!modal) return;
+        const address = (modal.querySelector('#bgp-address') as HTMLInputElement)?.value;
+        const remote_as = parseInt((modal.querySelector('#bgp-as') as HTMLInputElement)?.value || '0');
+        const description = (modal.querySelector('#bgp-desc') as HTMLInputElement)?.value;
+        if (!address || !remote_as) { showToast('Address and AS required', 'error'); return; }
+        const bgp = { ...this.state.bgp! };
+        const neighbor: BgpNeighbor = {
+          ...(existing ?? {
+            timers_keepalive: 60,
+            timers_hold: 180,
+            passive: false,
+          } as BgpNeighbor),
+          address,
+          remote_as,
+          description: description || undefined,
+        };
+        const neighbors = [...(bgp.neighbors || [])];
+        if (isEdit) neighbors[idx] = neighbor; else neighbors.push(neighbor);
+        bgp.neighbors = neighbors;
+        try {
+          await routingApi.saveBgpConfig(bgp);
+          showToast(isEdit ? 'Neighbor updated' : 'Neighbor added', 'success');
+          closeModal();
+          this.loadData();
+        } catch { showToast(isEdit ? 'Failed to update neighbor' : 'Failed to add neighbor', 'error'); }
+      },
+    });
+  }
+
+  private async deleteBgpNeighbor(idx: number): Promise<void> {
+    const bgp = { ...this.state.bgp! };
+    const neighbors = [...(bgp.neighbors || [])];
+    neighbors.splice(idx, 1);
+    bgp.neighbors = neighbors;
+    try {
+      await routingApi.saveBgpConfig(bgp);
+      showToast('Neighbor removed', 'success');
+      this.loadData();
+    } catch { showToast('Failed to remove neighbor', 'error'); }
+  }
+
+  private openStaticRouteModal(idx?: number): void {
+    const isEdit = typeof idx === 'number';
+    const existing = isEdit ? this.state.staticRoutes[idx] : undefined;
+    openModal({
+      title: isEdit ? '✎ Edit Static Route' : '+ Add Static Route',
+      body: `
+        <div class="form-group"><label class="form-label">Destination (CIDR or "default")</label><input type="text" class="form-input" id="sr-dst" placeholder="10.20.0.0/16" value="${escapeHtml(existing?.destination ?? '')}"></div>
+        <div class="grid-2">
+          <div class="form-group"><label class="form-label">Gateway</label><input type="text" class="form-input" id="sr-gw" placeholder="192.168.1.1" value="${escapeHtml(existing?.gateway ?? '')}"></div>
+          <div class="form-group"><label class="form-label">Interface (optional)</label><input type="text" class="form-input" id="sr-iface" placeholder="eth0" value="${escapeHtml(existing?.interface ?? '')}"></div>
+        </div>
+        <div class="form-group"><label class="form-label">Metric</label><input type="number" class="form-input" id="sr-metric" value="${existing?.metric ?? 100}" min="0" max="65535"></div>
+      `,
+      footer: `<button class="btn btn-secondary" data-modal-close>Cancel</button><button class="btn btn-primary" data-modal-submit>${isEdit ? 'Save Changes' : 'Add'}</button>`,
+      onSubmit: async () => {
+        const modal = document.querySelector('.modal');
+        if (!modal) return;
+        const destination = (modal.querySelector('#sr-dst') as HTMLInputElement)?.value;
+        const gateway = (modal.querySelector('#sr-gw') as HTMLInputElement)?.value;
+        const iface = (modal.querySelector('#sr-iface') as HTMLInputElement)?.value;
+        const metric = parseInt((modal.querySelector('#sr-metric') as HTMLInputElement)?.value || '100');
+        if (!destination || !gateway) { showToast('Destination and gateway required', 'error'); return; }
+        const route: StaticRoute = {
+          destination,
+          gateway,
+          interface: iface || undefined,
+          metric,
+        };
+        const routes = [...this.state.staticRoutes];
+        if (isEdit) routes[idx] = route; else routes.push(route);
+        try {
+          await routesApi.saveRoutes({ routes });
+          showToast(isEdit ? 'Route updated' : 'Route added', 'success');
+          closeModal();
+          this.loadData();
+        } catch { showToast(isEdit ? 'Failed to update route' : 'Failed to add route', 'error'); }
+      },
+    });
+  }
+
+  private async deleteStaticRoute(idx: number): Promise<void> {
+    const routes = [...this.state.staticRoutes];
+    routes.splice(idx, 1);
+    try {
+      await routesApi.saveRoutes({ routes });
+      showToast('Route removed', 'success');
+      this.loadData();
+    } catch { showToast('Failed to remove route', 'error'); }
   }
 
   render(): void {
@@ -133,7 +255,29 @@ export class RoutingPage extends Component<{
     });
 
     this.$<HTMLButtonElement>('#refresh-btn')?.addEventListener('click', () => this.loadData());
-    this.$<HTMLButtonElement>('#add-ospf-net')?.addEventListener('click', () => this.openAddNetworkModal());
+    this.$<HTMLButtonElement>('#add-ospf-net')?.addEventListener('click', () => this.openOspfNetworkModal());
+    this.$$<HTMLButtonElement>('[data-edit-ospf]').forEach(btn => {
+      btn.addEventListener('click', () => this.openOspfNetworkModal(parseInt(btn.dataset.editOspf!)));
+    });
+    this.$$<HTMLButtonElement>('[data-del-ospf]').forEach(btn => {
+      btn.addEventListener('click', () => this.deleteOspfNetwork(parseInt(btn.dataset.delOspf!)));
+    });
+
+    this.$<HTMLButtonElement>('#add-bgp-neighbor')?.addEventListener('click', () => this.openBgpNeighborModal());
+    this.$$<HTMLButtonElement>('[data-edit-bgp]').forEach(btn => {
+      btn.addEventListener('click', () => this.openBgpNeighborModal(parseInt(btn.dataset.editBgp!)));
+    });
+    this.$$<HTMLButtonElement>('[data-del-bgp]').forEach(btn => {
+      btn.addEventListener('click', () => this.deleteBgpNeighbor(parseInt(btn.dataset.delBgp!)));
+    });
+
+    this.$<HTMLButtonElement>('#add-static-route')?.addEventListener('click', () => this.openStaticRouteModal());
+    this.$$<HTMLButtonElement>('[data-edit-sr]').forEach(btn => {
+      btn.addEventListener('click', () => this.openStaticRouteModal(parseInt(btn.dataset.editSr!)));
+    });
+    this.$$<HTMLButtonElement>('[data-del-sr]').forEach(btn => {
+      btn.addEventListener('click', () => this.deleteStaticRoute(parseInt(btn.dataset.delSr!)));
+    });
   }
 
   private renderOspf(): string {
@@ -158,7 +302,7 @@ export class RoutingPage extends Component<{
                 <td>${escapeHtml(String(n.area))}</td>
                 <td><span class="badge badge-outline badge-sm">Normal</span></td>
                 <td><div class="actions">
-                  <button class="btn-icon" title="Edit">✎</button>
+                  <button class="btn-icon" title="Edit" data-edit-ospf="${i}">✎</button>
                   <button class="btn-icon danger" title="Delete" data-del-ospf="${i}">🗑</button>
                 </div></td>
               </tr>
@@ -201,19 +345,19 @@ export class RoutingPage extends Component<{
         <table class="table">
           <thead><tr><th>Address</th><th>Remote AS</th><th>Description</th><th></th></tr></thead>
           <tbody>
-            ${bgp.neighbors?.map((n: BgpNeighbor) => `
+            ${bgp.neighbors?.map((n: BgpNeighbor, i: number) => `
               <tr>
-                <td class="mono">${escapeHtml(n.address)}</td><td>${escapeHtml(String(n.remote_as))}</td><td>${escapeHtml(n.description) || '—'}</td>
+                <td class="mono">${escapeHtml(n.address)}</td><td>${escapeHtml(String(n.remote_as))}</td><td>${escapeHtml(n.description ?? '') || '—'}</td>
                 <td><div class="actions">
-                  <button class="btn-icon" title="Edit">✎</button>
-                  <button class="btn-icon danger" title="Delete">🗑</button>
+                  <button class="btn-icon" title="Edit" data-edit-bgp="${i}">✎</button>
+                  <button class="btn-icon danger" title="Delete" data-del-bgp="${i}">🗑</button>
                 </div></td>
               </tr>
             `).join('') || '<tr><td colspan="4" style="color: var(--color-text-muted);">No neighbors</td></tr>'}
           </tbody>
         </table>
       </div>
-      <button class="btn btn-secondary" style="margin-top: var(--spacing-md);">+ Add Neighbor</button>
+      <button id="add-bgp-neighbor" class="btn btn-secondary" style="margin-top: var(--spacing-md);">+ Add Neighbor</button>
 
       ${this.state.bgpSummary ? `
         <h4 style="margin: var(--spacing-lg) 0 var(--spacing-sm);">Peer Summary</h4>
@@ -229,20 +373,20 @@ export class RoutingPage extends Component<{
         <table class="table">
           <thead><tr><th>Destination</th><th>Gateway</th><th>Interface</th><th>Metric</th><th></th></tr></thead>
           <tbody>
-            ${routes.map((r: StaticRoute) => `
+            ${routes.map((r: StaticRoute, i: number) => `
               <tr>
                 <td class="mono">${escapeHtml(r.destination)}</td><td class="mono">${escapeHtml(r.gateway)}</td>
-                <td>${escapeHtml(r.interface) || '—'}</td><td>${escapeHtml(String(r.metric))}</td>
+                <td>${escapeHtml(r.interface ?? '') || '—'}</td><td>${escapeHtml(String(r.metric))}</td>
                 <td><div class="actions">
-                  <button class="btn-icon" title="Edit">✎</button>
-                  <button class="btn-icon danger" title="Delete">🗑</button>
+                  <button class="btn-icon" title="Edit" data-edit-sr="${i}">✎</button>
+                  <button class="btn-icon danger" title="Delete" data-del-sr="${i}">🗑</button>
                 </div></td>
               </tr>
             `).join('') || '<tr><td colspan="5" style="color: var(--color-text-muted);">No static routes</td></tr>'}
           </tbody>
         </table>
       </div>
-      <button class="btn btn-secondary" style="margin-top: var(--spacing-md);">+ Add Route</button>
+      <button id="add-static-route" class="btn btn-secondary" style="margin-top: var(--spacing-md);">+ Add Route</button>
     `;
   }
 

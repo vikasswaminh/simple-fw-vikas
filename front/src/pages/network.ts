@@ -147,6 +147,56 @@ export class NetworkPage extends Component<{
     });
 
     this.$<HTMLButtonElement>('#dns-settings-btn')?.addEventListener('click', () => this.openDnsModal());
+
+    // Role dropdown — persist to /api/interfaces/roles on change.
+    this.$$<HTMLSelectElement>('select[data-iface]').forEach(sel => {
+      sel.addEventListener('change', () => this.setInterfaceRole(sel.dataset.iface!, sel.value));
+    });
+
+    // Up/down toggle per interface.
+    this.$$<HTMLInputElement>('[data-toggle-link]').forEach(cb => {
+      cb.addEventListener('change', () => this.setInterfaceLink(cb.dataset.toggleLink!, cb.checked));
+    });
+
+    // ARP flush (only rendered on ARP tab).
+    this.$<HTMLButtonElement>('#flush-arp-btn')?.addEventListener('click', () => this.flushArp());
+  }
+
+  private async setInterfaceRole(name: string, role: string): Promise<void> {
+    try {
+      const existing = await networkApi.getRoles();
+      const roles = (existing.roles || []).filter((r: { interface: string }) => r.interface !== name);
+      if (role) {
+        roles.push({ interface: name, role, zone: role });
+      }
+      await networkApi.saveRoles({ roles });
+      showToast(`${name} role set to ${role || 'none'}`, 'success');
+      this.loadInterfaces();
+    } catch {
+      showToast('Failed to update role', 'error');
+      this.loadInterfaces();
+    }
+  }
+
+  private async setInterfaceLink(name: string, enabled: boolean): Promise<void> {
+    try {
+      await networkApi.configure({ name, enabled });
+      showToast(`${name} set ${enabled ? 'up' : 'down'}`, 'success');
+      this.loadInterfaces();
+    } catch {
+      showToast('Failed to toggle interface', 'error');
+      this.loadInterfaces();
+    }
+  }
+
+  private async flushArp(): Promise<void> {
+    try {
+      await toolsApi.flushArp();
+      showToast('ARP table flushed', 'success');
+      this.loadArp();
+    } catch {
+      showToast('Failed to flush ARP', 'error');
+    }
   }
 
   private renderInterfaces(interfaces: Interface[]): string {
@@ -178,7 +228,7 @@ export class NetworkPage extends Component<{
                 </td>
                 <td>
                   <label class="toggle">
-                    <input type="checkbox" ${iface.link_up ? 'checked' : ''} disabled>
+                    <input type="checkbox" ${iface.link_up ? 'checked' : ''} data-toggle-link="${escapeHtml(iface.name)}">
                     <span class="toggle-track"></span>
                   </label>
                 </td>

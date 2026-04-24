@@ -68,6 +68,7 @@ export const systemApi = {
   getSettings: () => api.get<SystemSettings>('/api/settings'),
   saveSettings: (settings: SystemSettings) => api.post('/api/settings', settings),
   reboot: (password: string) => api.post('/api/system/reboot', { confirm_password: password }),
+  factoryReset: (password: string) => api.post('/api/system/factory-reset', { confirm_password: password }),
 };
 
 /**
@@ -144,6 +145,7 @@ export const auditApi = {
  */
 export const toolsApi = {
   getArpTable: () => api.get<ArpEntry[]>('/api/tools/arp'),
+  flushArp: () => api.post('/api/tools/arp/flush', {}),
   getDhcpLeases: () => api.get<DhcpLease[]>('/api/tools/dhcp-leases'),
   getDnsLocal: () => api.get<DnsLocalEntry[]>('/api/tools/dns-local'),
   saveDnsLocal: (entries: DnsLocalEntry[]) => api.post('/api/tools/dns-local', entries),

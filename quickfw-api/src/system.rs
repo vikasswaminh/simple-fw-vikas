@@ -173,6 +173,7 @@ pub async fn create_router() -> Router {
         .route("/api/system/info", get(get_system_info))
         .route("/api/system/traffic", get(get_traffic_snapshot))
         .route("/api/system/reboot", post(reboot_system))
+        .route("/api/system/factory-reset", post(factory_reset))
         .route("/api/services", get(get_services))
         .route("/api/health", get(health_check)) // health endpoint
         .route("/api/interfaces", get(get_interfaces))
@@ -323,6 +324,54 @@ async fn reboot_system(
             )
         })?;
     Ok(Json("Rebooting"))
+}
+
+async fn factory_reset(
+    Json(payload): Json<RebootRequest>,
+) -> Result<Json<&'static str>, (StatusCode, Json<serde_json::Value>)> {
+    // Re-auth required — factory reset is destructive.
+    if payload.confirm_password.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "confirm_password required for factory reset"})),
+        ));
+    }
+    if !crate::auth::verify_password(&payload.confirm_password) {
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": "Invalid confirmation password"})),
+        ));
+    }
+
+    let _guard = state::config_lock().lock().await;
+
+    // Remove every config file under /etc/quickfw (keep the directory & the
+    // admin password hash — the user is logged in with it and we can't lock
+    // them out during reset). A fresh boot will regenerate defaults.
+    let targets = [
+        FIREWALL_PATH, NAT_PATH, ROUTES_PATH, SETTINGS_PATH,
+        ROLES_PATH, DESCRIPTIONS_PATH, SYSLOG_CONFIG_PATH,
+    ];
+    for p in targets {
+        if std::path::Path::new(p).exists() {
+            if let Err(e) = fs::remove_file(p) {
+                error!("factory-reset: failed to remove {}: {}", p, e);
+            }
+        }
+    }
+
+    info!("Factory reset performed via API; rebooting");
+    Command::new("systemctl")
+        .args(["reboot"])
+        .spawn()
+        .map_err(|e| {
+            error!("Failed to reboot after factory reset: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": format!("Reset applied but reboot failed: {}", e)})),
+            )
+        })?;
+    Ok(Json("Factory reset — rebooting"))
 }
 
 // ===================================================================

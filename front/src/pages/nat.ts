@@ -29,15 +29,17 @@ export class NatPage extends Component<{
     }
   }
 
-  private openAddMasqueradeModal(): void {
+  private openMasqueradeModal(idx?: number): void {
+    const isEdit = typeof idx === 'number';
+    const existing = isEdit ? this.state.config?.masquerade[idx] : undefined;
+
     openModal({
-      title: '+ Add Masquerade Rule',
+      title: isEdit ? '✎ Edit Masquerade Rule' : '+ Add Masquerade Rule',
       body: `
-        <div class="form-group"><label class="form-label">Out Interface</label><input type="text" class="form-input" id="masq-iface" placeholder="eth0"></div>
-        <div class="form-group"><label class="form-label">Source CIDR</label><input type="text" class="form-input" id="masq-cidr" placeholder="192.168.1.0/24"></div>
-        <div class="form-group"><label class="form-label">Description</label><input type="text" class="form-input" id="masq-desc" placeholder="LAN to WAN"></div>
+        <div class="form-group"><label class="form-label">Out Interface</label><input type="text" class="form-input" id="masq-iface" placeholder="eth0" value="${escapeHtml(existing?.out_interface ?? '')}"></div>
+        <div class="form-group"><label class="form-label">Source CIDR</label><input type="text" class="form-input" id="masq-cidr" placeholder="192.168.1.0/24" value="${escapeHtml(existing?.source_cidr ?? '')}"></div>
       `,
-      footer: `<button class="btn btn-secondary" data-modal-close>Cancel</button><button class="btn btn-primary" data-modal-submit>Add</button>`,
+      footer: `<button class="btn btn-secondary" data-modal-close>Cancel</button><button class="btn btn-primary" data-modal-submit>${isEdit ? 'Save Changes' : 'Add'}</button>`,
       onSubmit: async () => {
         const modal = document.querySelector('.modal');
         if (!modal) return;
@@ -45,47 +47,61 @@ export class NatPage extends Component<{
         const cidr = (modal.querySelector('#masq-cidr') as HTMLInputElement)?.value;
         if (!iface) { showToast('Interface required', 'error'); return; }
         const config = { ...this.state.config! };
-        config.masquerade = [...(config.masquerade || []), { out_interface: iface, source_cidr: cidr || undefined }];
+        const rule: MasqueradeRule = { out_interface: iface, source_cidr: cidr || '' };
+        const masq = [...(config.masquerade || [])];
+        if (isEdit) masq[idx] = rule; else masq.push(rule);
+        config.masquerade = masq;
         try {
           await natApi.saveConfig(config);
-          showToast('Masquerade rule added', 'success');
+          showToast(isEdit ? 'Masquerade rule updated' : 'Masquerade rule added', 'success');
           closeModal();
           this.loadData();
-        } catch { showToast('Failed to add rule', 'error'); }
+        } catch { showToast(isEdit ? 'Failed to update rule' : 'Failed to add rule', 'error'); }
       },
     });
   }
 
-  private openAddPortForwardModal(): void {
+  private openPortForwardModal(idx?: number): void {
+    const isEdit = typeof idx === 'number';
+    const existing = isEdit ? this.state.config?.port_forward[idx] : undefined;
+    const sel = (want: string, have: string | undefined) => (have === want ? 'selected' : '');
+    const proto = existing?.protocol ?? 'tcp';
+
     openModal({
-      title: '+ Add Port Forward Rule',
+      title: isEdit ? '✎ Edit Port Forward Rule' : '+ Add Port Forward Rule',
       body: `
-        <div class="form-group"><label class="form-label">In Interface</label><input type="text" class="form-input" id="pf-iface" placeholder="eth0"></div>
+        <div class="form-group"><label class="form-label">In Interface</label><input type="text" class="form-input" id="pf-iface" placeholder="eth0" value="${escapeHtml(existing?.in_interface ?? '')}"></div>
         <div class="grid-2">
           <div class="form-group"><label class="form-label">Protocol</label>
-            <select class="form-select" id="pf-proto"><option value="tcp">TCP</option><option value="udp">UDP</option></select>
+            <select class="form-select" id="pf-proto">
+              <option value="tcp" ${sel('tcp', proto)}>TCP</option>
+              <option value="udp" ${sel('udp', proto)}>UDP</option>
+            </select>
           </div>
-          <div class="form-group"><label class="form-label">Destination Port</label><input type="text" class="form-input" id="pf-dport" placeholder="80"></div>
+          <div class="form-group"><label class="form-label">Destination Port</label><input type="text" class="form-input" id="pf-dport" placeholder="80" value="${existing?.dest_port != null ? escapeHtml(String(existing.dest_port)) : ''}"></div>
         </div>
-        <div class="form-group"><label class="form-label">Forward To (IP:Port)</label><input type="text" class="form-input" id="pf-fwd" placeholder="192.168.1.100:8080"></div>
+        <div class="form-group"><label class="form-label">Forward To (IP:Port)</label><input type="text" class="form-input" id="pf-fwd" placeholder="192.168.1.100:8080" value="${escapeHtml(existing?.forward_to ?? '')}"></div>
       `,
-      footer: `<button class="btn btn-secondary" data-modal-close>Cancel</button><button class="btn btn-primary" data-modal-submit>Add</button>`,
+      footer: `<button class="btn btn-secondary" data-modal-close>Cancel</button><button class="btn btn-primary" data-modal-submit>${isEdit ? 'Save Changes' : 'Add'}</button>`,
       onSubmit: async () => {
         const modal = document.querySelector('.modal');
         if (!modal) return;
         const config = { ...this.state.config! };
-        config.port_forward = [...(config.port_forward || []), {
+        const rule = {
           in_interface: (modal.querySelector('#pf-iface') as HTMLInputElement)?.value || 'eth0',
           protocol: (modal.querySelector('#pf-proto') as HTMLSelectElement)?.value || 'tcp',
           dest_port: (modal.querySelector('#pf-dport') as HTMLInputElement)?.value || '',
           forward_to: (modal.querySelector('#pf-fwd') as HTMLInputElement)?.value || '',
-        }];
+        } as unknown as PortForwardRule;
+        const pf = [...(config.port_forward || [])];
+        if (isEdit) pf[idx] = rule; else pf.push(rule);
+        config.port_forward = pf;
         try {
           await natApi.saveConfig(config);
-          showToast('Port forward rule added', 'success');
+          showToast(isEdit ? 'Port forward updated' : 'Port forward rule added', 'success');
           closeModal();
           this.loadData();
-        } catch { showToast('Failed to add rule', 'error'); }
+        } catch { showToast(isEdit ? 'Failed to update rule' : 'Failed to add rule', 'error'); }
       },
     });
   }
@@ -144,8 +160,8 @@ export class NatPage extends Component<{
     });
 
     this.$<HTMLButtonElement>('#add-rule-btn')?.addEventListener('click', () => {
-      if (activeTab === 'masquerade') this.openAddMasqueradeModal();
-      else if (activeTab === 'port-forward') this.openAddPortForwardModal();
+      if (activeTab === 'masquerade') this.openMasqueradeModal();
+      else if (activeTab === 'port-forward') this.openPortForwardModal();
     });
 
     this.$$<HTMLButtonElement>('[data-delete-masq]').forEach(btn => {
@@ -153,6 +169,12 @@ export class NatPage extends Component<{
     });
     this.$$<HTMLButtonElement>('[data-delete-pf]').forEach(btn => {
       btn.addEventListener('click', () => this.deletePortForward(parseInt(btn.dataset.deletePf!)));
+    });
+    this.$$<HTMLButtonElement>('[data-edit-masq]').forEach(btn => {
+      btn.addEventListener('click', () => this.openMasqueradeModal(parseInt(btn.dataset.editMasq!)));
+    });
+    this.$$<HTMLButtonElement>('[data-edit-pf]').forEach(btn => {
+      btn.addEventListener('click', () => this.openPortForwardModal(parseInt(btn.dataset.editPf!)));
     });
   }
 
@@ -170,7 +192,7 @@ export class NatPage extends Component<{
                 <td>—</td>
                 <td><label class="toggle"><input type="checkbox" checked disabled><span class="toggle-track"></span></label></td>
                 <td><div class="actions">
-                  <button class="btn-icon" title="Edit">✎</button>
+                  <button class="btn-icon" title="Edit" data-edit-masq="${idx}">✎</button>
                   <button class="btn-icon danger" title="Delete" data-delete-masq="${idx}">🗑</button>
                 </div></td>
               </tr>
@@ -196,7 +218,7 @@ export class NatPage extends Component<{
                 <td class="mono">${escapeHtml(r.forward_to)}</td>
                 <td><label class="toggle"><input type="checkbox" checked disabled><span class="toggle-track"></span></label></td>
                 <td><div class="actions">
-                  <button class="btn-icon" title="Edit">✎</button>
+                  <button class="btn-icon" title="Edit" data-edit-pf="${idx}">✎</button>
                   <button class="btn-icon danger" title="Delete" data-delete-pf="${idx}">🗑</button>
                 </div></td>
               </tr>

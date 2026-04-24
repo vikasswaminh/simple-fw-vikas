@@ -3,7 +3,7 @@ import { firewallApi } from '@api/endpoints';
 import { openModal, closeModal } from '@components/modal';
 import { showToast } from '@components/toast';
 import { formatBytes, escapeHtml } from '@utils';
-import type { FirewallRule, FirewallConfig, FirewallGroups, RuleCounter, AddressGroup, PortGroup } from '@schemas';
+import type { FirewallRule, FirewallConfig, FirewallGroups, RuleCounter, AddressGroup, PortGroup, NftPreview } from '@schemas';
 
 export class FirewallPage extends Component<{
   config: FirewallConfig | null;
@@ -62,42 +62,65 @@ export class FirewallPage extends Component<{
     return c ? { packets: c.packets, bytes: c.bytes } : { packets: 0, bytes: 0 };
   }
 
-  private openAddRuleModal(): void {
+  private openRuleModal(idx?: number): void {
+    const isEdit = typeof idx === 'number';
+    const existing = isEdit ? this.state.config?.rules[idx] : undefined;
+    // For select elements, `selected` attribute must match the rule's current value.
+    const sel = (want: string, have: string | undefined) => (have === want ? 'selected' : '');
+    const proto = existing?.protocol ?? 'any';
+    const dir = existing?.direction ?? 'forward';
+    const action = existing?.action ?? 'accept';
+
     openModal({
-      title: '+ Add Firewall Rule',
+      title: isEdit ? '✎ Edit Firewall Rule' : '+ Add Firewall Rule',
       size: 'lg',
       body: `
         <div class="grid-2">
-          <div class="form-group"><label class="form-label">Name</label><input type="text" class="form-input" id="rule-name" placeholder="Rule name"></div>
+          <div class="form-group"><label class="form-label">Name</label><input type="text" class="form-input" id="rule-name" placeholder="Rule name" value="${escapeHtml(existing?.name ?? '')}"></div>
           <div class="form-group"><label class="form-label">Direction</label>
-            <select class="form-select" id="rule-dir"><option value="forward">Forward</option><option value="input">Input</option><option value="output">Output</option></select>
+            <select class="form-select" id="rule-dir">
+              <option value="forward" ${sel('forward', dir)}>Forward</option>
+              <option value="input" ${sel('input', dir)}>Input</option>
+              <option value="output" ${sel('output', dir)}>Output</option>
+            </select>
           </div>
         </div>
         <div class="grid-2">
           <div class="form-group"><label class="form-label">Protocol</label>
-            <select class="form-select" id="rule-proto"><option value="any">Any</option><option value="tcp">TCP</option><option value="udp">UDP</option><option value="icmp">ICMP</option><option value="tcp+udp">TCP+UDP</option></select>
+            <select class="form-select" id="rule-proto">
+              <option value="any" ${sel('any', proto)}>Any</option>
+              <option value="tcp" ${sel('tcp', proto)}>TCP</option>
+              <option value="udp" ${sel('udp', proto)}>UDP</option>
+              <option value="icmp" ${sel('icmp', proto)}>ICMP</option>
+              <option value="tcp+udp" ${sel('tcp+udp', proto)}>TCP+UDP</option>
+            </select>
           </div>
           <div class="form-group"><label class="form-label">Action</label>
-            <select class="form-select" id="rule-action"><option value="accept">Allow</option><option value="drop">Deny</option><option value="reject">Reject</option><option value="log">Log</option></select>
+            <select class="form-select" id="rule-action">
+              <option value="accept" ${sel('accept', action)}>Allow</option>
+              <option value="drop" ${sel('drop', action)}>Deny</option>
+              <option value="reject" ${sel('reject', action)}>Reject</option>
+              <option value="log" ${sel('log', action)}>Log</option>
+            </select>
           </div>
         </div>
         <div class="grid-2">
-          <div class="form-group"><label class="form-label">Source IP</label><input type="text" class="form-input" id="rule-src" placeholder="any"></div>
-          <div class="form-group"><label class="form-label">Source Port</label><input type="text" class="form-input" id="rule-sport" placeholder="any"></div>
+          <div class="form-group"><label class="form-label">Source IP</label><input type="text" class="form-input" id="rule-src" placeholder="any" value="${escapeHtml(existing?.src_ip ?? '')}"></div>
+          <div class="form-group"><label class="form-label">Source Port</label><input type="text" class="form-input" id="rule-sport" placeholder="any" value="${escapeHtml(existing?.src_port ?? '')}"></div>
         </div>
         <div class="grid-2">
-          <div class="form-group"><label class="form-label">Destination IP</label><input type="text" class="form-input" id="rule-dst" placeholder="any"></div>
-          <div class="form-group"><label class="form-label">Destination Port</label><input type="text" class="form-input" id="rule-dport" placeholder="any"></div>
+          <div class="form-group"><label class="form-label">Destination IP</label><input type="text" class="form-input" id="rule-dst" placeholder="any" value="${escapeHtml(existing?.dst_ip ?? '')}"></div>
+          <div class="form-group"><label class="form-label">Destination Port</label><input type="text" class="form-input" id="rule-dport" placeholder="any" value="${escapeHtml(existing?.dst_port ?? '')}"></div>
         </div>
-        <div class="form-group"><label class="form-label">Comment</label><input type="text" class="form-input" id="rule-comment" placeholder="Optional description"></div>
+        <div class="form-group"><label class="form-label">Comment</label><input type="text" class="form-input" id="rule-comment" placeholder="Optional description" value="${escapeHtml(existing?.comment ?? '')}"></div>
         <div style="display: flex; align-items: center; gap: var(--spacing-md);">
-          <label class="toggle"><input type="checkbox" id="rule-enabled" checked><span class="toggle-track"></span></label> <span style="font-size: var(--font-size-sm);">Enabled</span>
-          <label class="toggle"><input type="checkbox" id="rule-log"><span class="toggle-track"></span></label> <span style="font-size: var(--font-size-sm);">Log</span>
+          <label class="toggle"><input type="checkbox" id="rule-enabled" ${(existing?.enabled ?? true) ? 'checked' : ''}><span class="toggle-track"></span></label> <span style="font-size: var(--font-size-sm);">Enabled</span>
+          <label class="toggle"><input type="checkbox" id="rule-log" ${existing?.log ? 'checked' : ''}><span class="toggle-track"></span></label> <span style="font-size: var(--font-size-sm);">Log</span>
         </div>
       `,
       footer: `
-        <button class="btn btn-secondary modal-cancel-btn">Cancel</button>
-        <button class="btn btn-primary" data-modal-submit>Add Rule</button>
+        <button class="btn btn-secondary" data-modal-close>Cancel</button>
+        <button class="btn btn-primary" data-modal-submit>${isEdit ? 'Save Changes' : 'Add Rule'}</button>
       `,
       onSubmit: async () => {
         const modal = document.querySelector('.modal');
@@ -117,23 +140,61 @@ export class FirewallPage extends Component<{
           comment: getValue('rule-comment') || undefined,
           enabled: getChecked('rule-enabled'),
           log: getChecked('rule-log'),
-          ipv6: false,
+          ipv6: existing?.ipv6 ?? false,
         };
 
         try {
-          const config = { ...this.state.config!, rules: [...(this.state.config?.rules || []), newRule] };
-          await firewallApi.saveConfig(config);
-          showToast('Rule added successfully', 'success');
+          const rules = [...(this.state.config?.rules || [])];
+          if (isEdit) {
+            rules[idx] = newRule;
+          } else {
+            rules.push(newRule);
+          }
+          await firewallApi.saveConfig({ ...this.state.config!, rules });
+          showToast(isEdit ? 'Rule updated' : 'Rule added successfully', 'success');
           closeModal();
           this.loadData();
         } catch {
-          showToast('Failed to add rule', 'error');
+          showToast(isEdit ? 'Failed to update rule' : 'Failed to add rule', 'error');
         }
       },
     });
+  }
 
-    // Bind cancel
-    document.querySelector('.modal-cancel-btn')?.addEventListener('click', () => closeModal());
+  private async toggleRule(idx: number, enabled: boolean): Promise<void> {
+    const rules = [...(this.state.config?.rules || [])];
+    if (!rules[idx]) return;
+    rules[idx] = { ...rules[idx], enabled };
+    try {
+      await firewallApi.saveConfig({ ...this.state.config!, rules });
+      showToast(`Rule ${enabled ? 'enabled' : 'disabled'}`, 'success');
+      this.loadData();
+    } catch {
+      showToast('Failed to toggle rule', 'error');
+      // Reload to restore the checkbox to its server-side state.
+      this.loadData();
+    }
+  }
+
+  private async openPreviewModal(): Promise<void> {
+    if (!this.state.config) return;
+    try {
+      const preview: NftPreview = await firewallApi.preview(this.state.config);
+      openModal({
+        title: '◉ nftables Preview',
+        size: 'lg',
+        body: `
+          <p style="color: var(--color-text-muted); margin-bottom: var(--spacing-sm);">
+            Dry-run output for ${preview.rule_count} rule(s). This is what will be loaded on Apply.
+          </p>
+          <pre class="mono" style="background: var(--color-bg-subtle); padding: var(--spacing-md); border-radius: var(--radius-sm); max-height: 60vh; overflow: auto; white-space: pre-wrap; font-size: var(--font-size-sm);">${escapeHtml(preview.nft_script)}</pre>
+        `,
+        footer: '<button class="btn btn-secondary" data-modal-submit>Close</button>',
+        onSubmit: () => closeModal(),
+      });
+    } catch {
+      showToast('Failed to generate nft preview', 'error');
+    }
   }
 
   private openAliasesModal(): void {
@@ -282,8 +343,9 @@ export class FirewallPage extends Component<{
     `;
 
     // Bind events
-    this.$<HTMLButtonElement>('#add-rule-btn')?.addEventListener('click', () => this.openAddRuleModal());
+    this.$<HTMLButtonElement>('#add-rule-btn')?.addEventListener('click', () => this.openRuleModal());
     this.$<HTMLButtonElement>('#aliases-btn')?.addEventListener('click', () => this.openAliasesModal());
+    this.$<HTMLButtonElement>('#preview-btn')?.addEventListener('click', () => this.openPreviewModal());
     this.$<HTMLInputElement>('#search-input')?.addEventListener('input', (e) => {
       this.setState({ search: (e.target as HTMLInputElement).value });
     });
@@ -294,6 +356,12 @@ export class FirewallPage extends Component<{
     });
     this.$$<HTMLButtonElement>('[data-copy-rule]').forEach(btn => {
       btn.addEventListener('click', () => this.copyRule(parseInt(btn.dataset.copyRule!)));
+    });
+    this.$$<HTMLButtonElement>('[data-edit-rule]').forEach(btn => {
+      btn.addEventListener('click', () => this.openRuleModal(parseInt(btn.dataset.editRule!)));
+    });
+    this.$$<HTMLInputElement>('[data-toggle-rule]').forEach(cb => {
+      cb.addEventListener('change', () => this.toggleRule(parseInt(cb.dataset.toggleRule!), cb.checked));
     });
   }
 }
