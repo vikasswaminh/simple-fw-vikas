@@ -633,8 +633,13 @@ async fn login(
     // cross-site POSTs (the only relevant CSRF vector), and the session
     // cookie itself stays Strict.
     let csrf_token = generate_random_token();
+    // SameSite=None for the CSRF cookie. Same-origin request semantics vary
+    // across browsers for Lax on 127.0.0.1 / localhost, and the double-submit
+    // pattern does not rely on SameSite — security comes from the fact that
+    // cross-origin code cannot read the cookie value to put in the
+    // X-CSRF-Token header. Secure is required with SameSite=None.
     let csrf_cookie = format!(
-        "quickfw_csrf={}; Secure; SameSite=Lax; Path=/; Max-Age={}",
+        "quickfw_csrf={}; Secure; SameSite=None; Path=/; Max-Age={}",
         csrf_token, SESSION_MAX_AGE
     );
 
@@ -679,7 +684,7 @@ async fn logout(request: Request) -> impl IntoResponse {
     let clear_session =
         "quickfw_session=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0".to_string();
     let clear_csrf =
-        "quickfw_csrf=; Secure; SameSite=Lax; Path=/; Max-Age=0".to_string();
+        "quickfw_csrf=; Secure; SameSite=None; Path=/; Max-Age=0".to_string();
 
     let mut headers = axum::http::HeaderMap::new();
     headers.append(header::SET_COOKIE, clear_session.parse().unwrap());

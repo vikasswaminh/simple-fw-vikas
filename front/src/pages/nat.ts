@@ -3,7 +3,7 @@ import { natApi } from '@api/endpoints';
 import { openModal, closeModal } from '@components/modal';
 import { showToast } from '@components/toast';
 import { escapeHtml } from '@utils';
-import type { NatConfig, MasqueradeRule, PortForwardRule } from '@schemas';
+import type { NatConfig, MasqueradeRule, PortForwardRule, SnatRule } from '@schemas';
 
 export class NatPage extends Component<{
   config: NatConfig | null;
@@ -162,6 +162,7 @@ export class NatPage extends Component<{
     this.$<HTMLButtonElement>('#add-rule-btn')?.addEventListener('click', () => {
       if (activeTab === 'masquerade') this.openMasqueradeModal();
       else if (activeTab === 'port-forward') this.openPortForwardModal();
+      else if (activeTab === 'static') this.openSnatModal();
     });
 
     this.$$<HTMLButtonElement>('[data-delete-masq]').forEach(btn => {
@@ -175,6 +176,12 @@ export class NatPage extends Component<{
     });
     this.$$<HTMLButtonElement>('[data-edit-pf]').forEach(btn => {
       btn.addEventListener('click', () => this.openPortForwardModal(parseInt(btn.dataset.editPf!)));
+    });
+    this.$$<HTMLButtonElement>('[data-delete-snat]').forEach(btn => {
+      btn.addEventListener('click', () => this.deleteSnat(parseInt(btn.dataset.deleteSnat!)));
+    });
+    this.$$<HTMLButtonElement>('[data-edit-snat]').forEach(btn => {
+      btn.addEventListener('click', () => this.openSnatModal(parseInt(btn.dataset.editSnat!)));
     });
   }
 
@@ -230,11 +237,72 @@ export class NatPage extends Component<{
   }
 
   private renderStatic(): string {
+    const rules = this.state.config?.snat || [];
     return `
-      <div style="padding: var(--spacing-xl); text-align: center; color: var(--color-text-muted);">
-        <p>1:1 NAT (Static SNAT) rules can be configured here.</p>
-        <p style="margin-top: var(--spacing-sm);">Use the API to manage static SNAT rules.</p>
+      <div class="table-container">
+        <table class="table">
+          <thead><tr><th>Source CIDR</th><th>Translated To</th><th>Out Interface</th><th>Enabled</th><th></th></tr></thead>
+          <tbody>
+            ${rules.length > 0 ? rules.map((r: SnatRule, idx: number) => `
+              <tr>
+                <td class="mono">${escapeHtml(r.source_cidr)}</td>
+                <td class="mono">${escapeHtml(r.to_address)}</td>
+                <td class="mono">${escapeHtml(r.out_interface ?? '') || '—'}</td>
+                <td><label class="toggle"><input type="checkbox" checked disabled><span class="toggle-track"></span></label></td>
+                <td><div class="actions">
+                  <button class="btn-icon" title="Edit" data-edit-snat="${idx}">✎</button>
+                  <button class="btn-icon danger" title="Delete" data-delete-snat="${idx}">🗑</button>
+                </div></td>
+              </tr>
+            `).join('') : '<tr><td colspan="5" style="color: var(--color-text-muted);">No static SNAT rules</td></tr>'}
+          </tbody>
+        </table>
       </div>
     `;
+  }
+
+  private openSnatModal(idx?: number): void {
+    const isEdit = typeof idx === 'number';
+    const existing = isEdit ? this.state.config?.snat[idx] : undefined;
+
+    openModal({
+      title: isEdit ? '✎ Edit 1:1 NAT Rule' : '+ Add 1:1 NAT Rule',
+      body: `
+        <div class="form-group"><label class="form-label">Source CIDR</label><input type="text" class="form-input" id="snat-src" placeholder="10.10.0.0/24" value="${escapeHtml(existing?.source_cidr ?? '')}"></div>
+        <div class="form-group"><label class="form-label">Translated Source Address</label><input type="text" class="form-input" id="snat-to" placeholder="203.0.113.5" value="${escapeHtml(existing?.to_address ?? '')}"></div>
+        <div class="form-group"><label class="form-label">Out Interface (optional)</label><input type="text" class="form-input" id="snat-oif" placeholder="eth0" value="${escapeHtml(existing?.out_interface ?? '')}"></div>
+      `,
+      footer: `<button class="btn btn-secondary" data-modal-close>Cancel</button><button class="btn btn-primary" data-modal-submit>${isEdit ? 'Save Changes' : 'Add'}</button>`,
+      onSubmit: async () => {
+        const modal = document.querySelector('.modal');
+        if (!modal) return;
+        const src = (modal.querySelector('#snat-src') as HTMLInputElement)?.value.trim();
+        const to = (modal.querySelector('#snat-to') as HTMLInputElement)?.value.trim();
+        const oif = (modal.querySelector('#snat-oif') as HTMLInputElement)?.value.trim();
+        if (!src || !to) { showToast('Source CIDR and translated address required', 'error'); return; }
+
+        const rule: SnatRule = { source_cidr: src, to_address: to, out_interface: oif || undefined };
+        const config = { ...this.state.config! };
+        const snat = [...(config.snat || [])];
+        if (isEdit) snat[idx] = rule; else snat.push(rule);
+        config.snat = snat;
+
+        try {
+          await natApi.saveConfig(config);
+          showToast(isEdit ? '1:1 NAT rule updated' : '1:1 NAT rule added', 'success');
+          closeModal();
+          this.loadData();
+        } catch { showToast(isEdit ? 'Failed to update rule' : 'Failed to add rule', 'error'); }
+      },
+    });
+  }
+
+  private async deleteSnat(idx: number): Promise<void> {
+    try {
+      // Backend indexes are 1-based for delete.
+      await natApi.deleteSnat(idx + 1);
+      showToast('Rule deleted', 'success');
+      this.loadData();
+    } catch { showToast('Failed to delete', 'error'); }
   }
 }

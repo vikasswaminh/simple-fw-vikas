@@ -111,6 +111,7 @@ export const natApi = {
   saveConfig: (config: NatConfig) => api.post('/api/nat', config),
   deleteMasquerade: (index: number) => api.delete(`/api/nat/masquerade/${index}`),
   deletePortForward: (index: number) => api.delete(`/api/nat/port_forward/${index}`),
+  deleteSnat: (index: number) => api.delete(`/api/nat/snat/${index}`),
 };
 
 /**

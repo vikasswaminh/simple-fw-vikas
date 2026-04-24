@@ -294,6 +294,17 @@ pub fn validate_port_forward_rule(rule: &gfw_io::nat::PortForwardRule) -> Result
     Ok(())
 }
 
+/// Validate a static SnatRule (1:1 NAT).
+pub fn validate_snat_rule(rule: &gfw_io::nat::SnatRule) -> Result<(), String> {
+    validate_cidr(&rule.source_cidr)?;
+    validate_ip(&rule.to_address)?;
+    // out_interface is optional — only validate when set.
+    if !rule.out_interface.is_empty() {
+        validate_interface(&rule.out_interface)?;
+    }
+    Ok(())
+}
+
 /// Validate an entire NatConfig.
 pub fn validate_nat_config(config: &gfw_io::nat::NatConfig) -> Result<(), String> {
     for rule in &config.masquerade {
@@ -301,6 +312,9 @@ pub fn validate_nat_config(config: &gfw_io::nat::NatConfig) -> Result<(), String
     }
     for rule in &config.port_forward {
         validate_port_forward_rule(rule)?;
+    }
+    for rule in &config.snat {
+        validate_snat_rule(rule)?;
     }
     Ok(())
 }

@@ -69,8 +69,11 @@ fn generate_nat_nft_script(config: &NatConfig) -> String {
     // Using `add` so it doesn't fail if the table already exists.
     script.push_str(&format!("add table {} {}\n", NFT_FAMILY, NFT_TABLE));
 
-    // POSTROUTING chain for SNAT/masquerade
-    if !config.masquerade.is_empty() {
+    // POSTROUTING chain for SNAT/masquerade + static 1:1 SNAT.
+    // Both feature types live in POSTROUTING — declare the chain once and
+    // emit the rules for either type if present.
+    let needs_postrouting = !config.masquerade.is_empty() || !config.snat.is_empty();
+    if needs_postrouting {
         script.push_str(&format!(
             "add chain {} {} POSTROUTING {{ type nat hook postrouting priority srcnat; policy accept; }}\n",
             NFT_FAMILY, NFT_TABLE
@@ -89,6 +92,21 @@ fn generate_nat_nft_script(config: &NatConfig) -> String {
                 script.push_str(&format!(
                     "add rule {} {} POSTROUTING oifname \"{}\" ip saddr {} masquerade\n",
                     NFT_FAMILY, NFT_TABLE, rule.out_interface, rule.source_cidr
+                ));
+            }
+        }
+        // Static 1:1 SNAT: translate a CIDR's source address to a fixed IP.
+        // If out_interface is provided, scope the rule to that interface.
+        for rule in &config.snat {
+            if rule.out_interface.is_empty() {
+                script.push_str(&format!(
+                    "add rule {} {} POSTROUTING ip saddr {} snat ip to {}\n",
+                    NFT_FAMILY, NFT_TABLE, rule.source_cidr, rule.to_address
+                ));
+            } else {
+                script.push_str(&format!(
+                    "add rule {} {} POSTROUTING oifname \"{}\" ip saddr {} snat ip to {}\n",
+                    NFT_FAMILY, NFT_TABLE, rule.out_interface, rule.source_cidr, rule.to_address
                 ));
             }
         }
@@ -117,7 +135,7 @@ fn generate_nat_nft_script(config: &NatConfig) -> String {
 
 /// Apply NAT rules by generating and executing an nftables script.
 pub fn apply_nat(config: &NatConfig) -> Result<(), Box<dyn std::error::Error>> {
-    if config.masquerade.is_empty() && config.port_forward.is_empty() {
+    if config.masquerade.is_empty() && config.port_forward.is_empty() && config.snat.is_empty() {
         info!("No NAT rules configured, skipping");
         return Ok(());
     }
@@ -174,6 +192,7 @@ mod tests {
                 source_cidr: "192.168.1.0/24".to_string(),
             }],
             port_forward: vec![],
+            snat: vec![],
         };
         let script = generate_nat_nft_script(&config);
         assert!(script.contains("POSTROUTING"));
@@ -193,11 +212,30 @@ mod tests {
                 forward_to: "192.168.1.100:80".to_string(),
                 in_interface: "eth0".to_string(),
             }],
+            snat: vec![],
         };
         let script = generate_nat_nft_script(&config);
         assert!(script.contains("PREROUTING"));
-        assert!(script.contains("dnat to 192.168.1.100:80"));
+        assert!(script.contains("dnat ip to 192.168.1.100:80"));
         assert!(script.contains("tcp dport 8080"));
+    }
+
+    #[test]
+    fn test_generate_nat_script_static_snat() {
+        let config = NatConfig {
+            masquerade: vec![],
+            port_forward: vec![],
+            snat: vec![SnatRule {
+                source_cidr: "10.10.0.0/24".to_string(),
+                to_address: "203.0.113.5".to_string(),
+                out_interface: "eth0".to_string(),
+            }],
+        };
+        let script = generate_nat_nft_script(&config);
+        assert!(script.contains("POSTROUTING"));
+        assert!(script.contains("snat ip to 203.0.113.5"));
+        assert!(script.contains("ip saddr 10.10.0.0/24"));
+        assert!(script.contains("oifname \"eth0\""));
     }
 
     #[test]
@@ -221,11 +259,12 @@ mod tests {
                 forward_to: "10.0.0.2:53".to_string(),
                 in_interface: "wan0".to_string(),
             }],
+            snat: vec![],
         };
         let script = generate_nat_nft_script(&config);
         assert!(script.contains("POSTROUTING"));
         assert!(script.contains("PREROUTING"));
         assert!(script.contains("masquerade"));
-        assert!(script.contains("dnat to 10.0.0.2:53"));
+        assert!(script.contains("dnat ip to 10.0.0.2:53"));
     }
 }
