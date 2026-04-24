@@ -45,11 +45,10 @@ export class FirewallPage extends Component<{
     }
   }
 
-  private getFilteredRules(): FirewallRule[] {
-    const rules = this.state.config?.rules || [];
+  private ruleMatchesSearch(r: FirewallRule): boolean {
     const s = this.state.search.toLowerCase();
-    if (!s) return rules;
-    return rules.filter((r: FirewallRule) =>
+    if (!s) return true;
+    return (
       r.name.toLowerCase().includes(s) ||
       (r.src_ip || '').toLowerCase().includes(s) ||
       (r.dst_ip || '').toLowerCase().includes(s) ||
@@ -180,17 +179,40 @@ export class FirewallPage extends Component<{
     if (!this.state.config) return;
     try {
       const preview: NftPreview = await firewallApi.preview(this.state.config);
+      const enabled = this.state.config.rules.filter(r => r.enabled).length;
+      const disabled = this.state.config.rules.length - enabled;
       openModal({
         title: '◉ nftables Preview',
         size: 'lg',
         body: `
+          <div style="display: flex; gap: var(--spacing-md); margin-bottom: var(--spacing-md); flex-wrap: wrap;">
+            <span class="badge badge-outline badge-sm">Rules: ${preview.rule_count}</span>
+            <span class="badge badge-success badge-sm">Enabled: ${enabled}</span>
+            <span class="badge badge-outline badge-sm">Disabled: ${disabled}</span>
+            <span class="badge badge-outline badge-sm">Default in: ${escapeHtml(this.state.config.input_policy)}</span>
+            <span class="badge badge-outline badge-sm">Default fwd: ${escapeHtml(this.state.config.forward_policy)}</span>
+            <span class="badge badge-outline badge-sm">Default out: ${escapeHtml(this.state.config.output_policy)}</span>
+          </div>
           <p style="color: var(--color-text-muted); margin-bottom: var(--spacing-sm);">
-            Dry-run output for ${preview.rule_count} rule(s). This is what will be loaded on Apply.
+            Dry-run nftables script. "Apply" re-runs the current config on the live ruleset —
+            useful if the ruleset was flushed externally.
           </p>
-          <pre class="mono" style="background: var(--color-bg-subtle); padding: var(--spacing-md); border-radius: var(--radius-sm); max-height: 60vh; overflow: auto; white-space: pre-wrap; font-size: var(--font-size-sm);">${escapeHtml(preview.nft_script)}</pre>
+          <pre class="mono" style="background: var(--color-bg-subtle); padding: var(--spacing-md); border-radius: var(--radius-sm); max-height: 55vh; overflow: auto; white-space: pre-wrap; font-size: var(--font-size-sm);">${escapeHtml(preview.nft_script)}</pre>
         `,
-        footer: '<button class="btn btn-secondary" data-modal-submit>Close</button>',
-        onSubmit: () => closeModal(),
+        footer: `
+          <button class="btn btn-secondary" data-modal-close>Close</button>
+          <button class="btn btn-primary" data-modal-submit>Apply</button>
+        `,
+        onSubmit: async () => {
+          try {
+            await firewallApi.saveConfig(this.state.config!);
+            showToast('Ruleset re-applied', 'success');
+            closeModal();
+            this.loadData();
+          } catch {
+            showToast('Failed to apply ruleset', 'error');
+          }
+        },
       });
     } catch {
       showToast('Failed to generate nft preview', 'error');
@@ -257,6 +279,25 @@ export class FirewallPage extends Component<{
     }
   }
 
+  /**
+   * Move a rule up (-1) or down (+1). nftables rules evaluate top-down, so
+   * this changes what matches first — a common operational need.
+   */
+  private async moveRule(idx: number, delta: -1 | 1): Promise<void> {
+    const rules = [...(this.state.config?.rules || [])];
+    const target = idx + delta;
+    if (target < 0 || target >= rules.length) return;
+    [rules[idx], rules[target]] = [rules[target], rules[idx]];
+    try {
+      await firewallApi.saveConfig({ ...this.state.config!, rules });
+      showToast(delta < 0 ? 'Rule moved up' : 'Rule moved down', 'success');
+      this.loadData();
+    } catch {
+      showToast('Failed to reorder rule', 'error');
+      this.loadData();
+    }
+  }
+
   render(): void {
     const { config, loading, error, search } = this.state;
 
@@ -265,7 +306,12 @@ export class FirewallPage extends Component<{
       return;
     }
 
-    const rules = this.getFilteredRules();
+    // Always iterate the unfiltered array so data-* indices match the true
+    // config positions. Rows that don't match the search are skipped during
+    // the .map(), but their indices are preserved for Edit/Delete/Move.
+    const allRules = config?.rules || [];
+    const filtering = !!search;
+    const visibleCount = allRules.filter(r => this.ruleMatchesSearch(r)).length;
 
     this.element.innerHTML = `
       <div class="page-header">
@@ -302,8 +348,19 @@ export class FirewallPage extends Component<{
               </tr>
             </thead>
             <tbody>
-              ${rules.length > 0 ? rules.map((rule: FirewallRule, idx: number) => {
+              ${visibleCount > 0 ? allRules.map((rule: FirewallRule, idx: number) => {
+                if (!this.ruleMatchesSearch(rule)) return '';
                 const c = this.getCounter(rule.name);
+                const isFirst = idx === 0;
+                const isLast = idx === allRules.length - 1;
+                // Reorder only makes sense on an unfiltered view — otherwise
+                // "up" could swap with an invisible neighbor.
+                const upDisabled = isFirst || filtering
+                  ? `disabled title="${filtering ? 'Clear search to reorder' : 'Already first'}"`
+                  : '';
+                const downDisabled = isLast || filtering
+                  ? `disabled title="${filtering ? 'Clear search to reorder' : 'Already last'}"`
+                  : '';
                 return `
                 <tr>
                   <td style="color: var(--color-text-muted);">${idx + 1}</td>
@@ -329,6 +386,8 @@ export class FirewallPage extends Component<{
                   </td>
                   <td>
                     <div class="actions">
+                      <button class="btn-icon" title="Move up" data-move-up="${idx}" ${upDisabled}>↑</button>
+                      <button class="btn-icon" title="Move down" data-move-down="${idx}" ${downDisabled}>↓</button>
                       <button class="btn-icon" title="Edit" data-edit-rule="${idx}">✎</button>
                       <button class="btn-icon" title="Copy" data-copy-rule="${idx}">❐</button>
                       <button class="btn-icon danger" title="Delete" data-delete-rule="${idx}">🗑</button>
@@ -362,6 +421,12 @@ export class FirewallPage extends Component<{
     });
     this.$$<HTMLInputElement>('[data-toggle-rule]').forEach(cb => {
       cb.addEventListener('change', () => this.toggleRule(parseInt(cb.dataset.toggleRule!), cb.checked));
+    });
+    this.$$<HTMLButtonElement>('[data-move-up]').forEach(btn => {
+      btn.addEventListener('click', () => this.moveRule(parseInt(btn.dataset.moveUp!), -1));
+    });
+    this.$$<HTMLButtonElement>('[data-move-down]').forEach(btn => {
+      btn.addEventListener('click', () => this.moveRule(parseInt(btn.dataset.moveDown!), 1));
     });
   }
 }
