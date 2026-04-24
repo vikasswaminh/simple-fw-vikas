@@ -1,5 +1,6 @@
 import { Component } from '@components/component';
-import { auditApi } from '@api/endpoints';
+import { auditApi, logsApi } from '@api/endpoints';
+import type { LogSource } from '@api/endpoints';
 import type { AuditEntry } from '@schemas';
 import { formatTime, escapeHtml } from '@utils';
 
@@ -13,6 +14,10 @@ export class AuditPage extends Component<{
   filterStatus: string;
   page: number;
   perPage: number;
+  activeTab: 'audit' | 'system' | 'firewall';
+  logLines: string[];
+  logTruncated: boolean;
+  logError: string | null;
 }> {
   constructor(element: HTMLElement | string) {
     super(element);
@@ -20,6 +25,8 @@ export class AuditPage extends Component<{
       entries: [], filtered: [], loading: true, error: null,
       filterMethod: '', filterUser: '', filterStatus: '',
       page: 1, perPage: 20,
+      activeTab: 'audit',
+      logLines: [], logTruncated: false, logError: null,
     };
   }
 
@@ -34,6 +41,19 @@ export class AuditPage extends Component<{
       this.applyFilters();
     } catch (error) {
       this.setState({ error: error instanceof Error ? error.message : 'Failed to load', loading: false });
+    }
+  }
+
+  private async loadLog(source: LogSource): Promise<void> {
+    this.setState({ logLines: [], logTruncated: false, logError: null });
+    try {
+      const r = await logsApi.get(source, 500);
+      this.setState({ logLines: r.lines, logTruncated: r.truncated });
+    } catch {
+      // 403 for non-admins.
+      this.setState({
+        logError: 'Only admins can view system and firewall logs.',
+      });
     }
   }
 
@@ -85,7 +105,7 @@ export class AuditPage extends Component<{
   }
 
   render(): void {
-    const { filtered, loading, error, page, perPage, filterMethod, filterStatus } = this.state;
+    const { filtered, loading, error, page, perPage, filterMethod, filterStatus, activeTab } = this.state;
 
     if (loading) {
       this.element.innerHTML = `<div class="loading"><div class="spinner"></div> Loading...</div>`;
@@ -95,6 +115,40 @@ export class AuditPage extends Component<{
     const totalPages = Math.ceil(filtered.length / perPage);
     const pageData = filtered.slice((page - 1) * perPage, page * perPage);
     const users = [...new Set(this.state.entries.map((e: AuditEntry) => e.user))];
+
+    // Non-audit tabs render a log-lines panel.
+    if (activeTab !== 'audit') {
+      this.element.innerHTML = `
+        <div class="page-header">
+          <h1 class="page-title">Logs</h1>
+          <div class="page-actions">
+            ${this.state.logTruncated ? '<span class="badge badge-outline">truncated (500 most recent)</span>' : ''}
+            <button id="refresh-btn" class="btn btn-secondary">↻ Refresh</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="tab-bar">
+            <button class="tab-btn" data-tab="audit">Audit</button>
+            <button class="tab-btn ${activeTab === 'system' ? 'active' : ''}" data-tab="system">System</button>
+            <button class="tab-btn ${activeTab === 'firewall' ? 'active' : ''}" data-tab="firewall">Firewall</button>
+          </div>
+          ${this.state.logError
+            ? `<p style="color: var(--color-text-muted); padding: var(--spacing-lg);">${escapeHtml(this.state.logError)}</p>`
+            : `<pre class="mono" style="background: var(--color-bg-subtle); padding: var(--spacing-md); border-radius: var(--radius-sm); max-height: 70vh; overflow: auto; white-space: pre-wrap; font-size: var(--font-size-sm);">${this.state.logLines.length
+                ? escapeHtml(this.state.logLines.join('\n'))
+                : '(empty — admin access required, or no log entries)'}</pre>`}
+        </div>
+      `;
+      this.$<HTMLButtonElement>('#refresh-btn')?.addEventListener('click', () => this.loadLog(activeTab));
+      this.$$<HTMLButtonElement>('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const tab = btn.dataset.tab as typeof activeTab;
+          this.setState({ activeTab: tab });
+          if (tab !== 'audit') this.loadLog(tab);
+        });
+      });
+      return;
+    }
 
     this.element.innerHTML = `
       <div class="page-header">
@@ -108,6 +162,12 @@ export class AuditPage extends Component<{
       </div>
 
       <div class="card">
+        <div class="tab-bar">
+          <button class="tab-btn active" data-tab="audit">Audit</button>
+          <button class="tab-btn" data-tab="system">System</button>
+          <button class="tab-btn" data-tab="firewall">Firewall</button>
+        </div>
+
         <!-- Filters -->
         <div style="display: flex; gap: var(--spacing-sm); margin-bottom: var(--spacing-md); flex-wrap: wrap;">
           <select class="form-select" id="filter-method" style="width: 120px;">
@@ -181,6 +241,14 @@ export class AuditPage extends Component<{
 
     this.$$<HTMLButtonElement>('[data-page]').forEach(btn => {
       btn.addEventListener('click', () => this.setState({ page: parseInt(btn.dataset.page!) }));
+    });
+
+    this.$$<HTMLButtonElement>('.tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const tab = btn.dataset.tab as typeof activeTab;
+        this.setState({ activeTab: tab });
+        if (tab !== 'audit') this.loadLog(tab);
+      });
     });
   }
 

@@ -142,6 +142,16 @@ export const auditApi = {
 };
 
 /**
+ * Local log viewer (Phase J — admin-only).
+ */
+export type LogSource = 'audit' | 'system' | 'firewall';
+export interface LogResponse { source: LogSource; lines: string[]; truncated: boolean }
+export const logsApi = {
+  get: (source: LogSource, tail = 200) =>
+    api.get<LogResponse>(`/api/logs?source=${source}&tail=${tail}`),
+};
+
+/**
  * Tools API endpoints
  */
 export const toolsApi = {
