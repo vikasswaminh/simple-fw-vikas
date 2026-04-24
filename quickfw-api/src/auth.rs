@@ -46,6 +46,7 @@ const BANNED_PASSWORDS: &[&str] = &[
 
 struct SessionInfo {
     user: String,
+    role: crate::users::Role,
     last_active: u64,
 }
 
@@ -62,9 +63,51 @@ lazy_static::lazy_static! {
     static ref RATE_LIMITS: Mutex<HashMap<String, RateEntry>> = Mutex::new(HashMap::new());
 }
 
-/// Authenticated user identity — set as a request extension by auth middleware.
+/// Authenticated user identity — set as a request extension by auth
+/// middleware. Carries the resolved role so gate middleware can inspect it
+/// without re-reading users.yaml on every request.
 #[derive(Clone)]
-pub struct AuthUser(pub String);
+pub struct AuthUser {
+    pub username: String,
+    pub role: crate::users::Role,
+}
+
+impl AuthUser {
+    pub fn new(username: String, role: crate::users::Role) -> Self {
+        Self { username, role }
+    }
+    pub fn anonymous() -> Self {
+        Self { username: "anonymous".to_string(), role: crate::users::Role::Readonly }
+    }
+}
+
+/// Middleware that gates handlers by minimum required role. Use with
+/// `from_fn(require_role(Role::Admin))`. A missing AuthUser (no auth) or
+/// insufficient role returns 403.
+pub fn require_role(
+    min: crate::users::Role,
+) -> impl Fn(
+    Request,
+    axum::middleware::Next,
+) -> std::pin::Pin<
+    Box<dyn std::future::Future<Output = Result<Response, Response>> + Send>,
+> + Clone {
+    move |request: Request, next: axum::middleware::Next| {
+        let min = min;
+        Box::pin(async move {
+            let has_role = request
+                .extensions()
+                .get::<AuthUser>()
+                .map(|u| u.role >= min)
+                .unwrap_or(false);
+            if has_role {
+                Ok(next.run(request).await)
+            } else {
+                Err(forbidden_response("Insufficient role"))
+            }
+        })
+    }
+}
 
 // --- Router ---
 
@@ -180,9 +223,7 @@ pub async fn basic_auth_middleware(
         || path == "/index.html"
         || path == "/login.html"
     {
-        request
-            .extensions_mut()
-            .insert(AuthUser("anonymous".to_string()));
+        request.extensions_mut().insert(AuthUser::anonymous());
         return Ok(next.run(request).await);
     }
 
@@ -199,9 +240,11 @@ pub async fn basic_auth_middleware(
         });
         match token {
             Some(t) if verify_ws_token(&t) => {
+                // WS tokens are issued to logged-in admins (frontend gates
+                // /api/auth/ws-token). Treat WS connection as admin.
                 request
                     .extensions_mut()
-                    .insert(AuthUser(DEFAULT_USER.to_string()));
+                    .insert(AuthUser::new(DEFAULT_USER.to_string(), crate::users::Role::Admin));
                 return Ok(next.run(request).await);
             }
             _ => {
@@ -223,7 +266,7 @@ pub async fn basic_auth_middleware(
     }
 
     // --- Try session cookie ---
-    if let Some(user) = check_session_cookie(&request) {
+    if let Some((user, role)) = check_session_cookie(&request) {
         let needs_change = tokio::task::spawn_blocking(is_default_password).await.unwrap_or(true);
         if needs_change && !is_auth_path(&path) {
             return Err(forced_password_change_response());
@@ -234,7 +277,7 @@ pub async fn basic_auth_middleware(
         if !csrf_check(&request, &path) {
             return Err(forbidden_response("CSRF token missing or invalid"));
         }
-        request.extensions_mut().insert(AuthUser(user));
+        request.extensions_mut().insert(AuthUser::new(user, role));
         return Ok(next.run(request).await);
     }
 
@@ -269,9 +312,19 @@ pub async fn basic_auth_middleware(
                                 entry.login_failures = 0;
                             }
                         }
+                        // Look up the user's role from users.yaml so Basic
+                        // auth callers still flow through RBAC.
+                        let user_for_role = user.clone();
+                        let role = tokio::task::spawn_blocking(move || {
+                            crate::users::find_user(&crate::users::load_users(), &user_for_role)
+                                .map(|u| u.role)
+                                .unwrap_or(crate::users::Role::Readonly)
+                        })
+                        .await
+                        .unwrap_or(crate::users::Role::Readonly);
                         request
                             .extensions_mut()
-                            .insert(AuthUser(user));
+                            .insert(AuthUser::new(user, role));
                         return Ok(next.run(request).await);
                     } else {
                         // Track auth failure
@@ -396,7 +449,7 @@ fn forbidden_response(reason: &str) -> Response {
 
 // --- Session helpers ---
 
-fn check_session_cookie(request: &Request) -> Option<String> {
+fn check_session_cookie(request: &Request) -> Option<(String, crate::users::Role)> {
     let cookie_header = request.headers().get(header::COOKIE)?.to_str().ok()?;
     let token = cookie_header
         .split(';')
@@ -409,7 +462,7 @@ fn check_session_cookie(request: &Request) -> Option<String> {
     if let Some(session) = sessions.get_mut(token) {
         if now - session.last_active < SESSION_MAX_AGE {
             session.last_active = now; // sliding window
-            return Some(session.user.clone());
+            return Some((session.user.clone(), session.role));
         } else {
             sessions.remove(token);
         }
@@ -417,7 +470,7 @@ fn check_session_cookie(request: &Request) -> Option<String> {
     None
 }
 
-fn create_session(user: &str) -> String {
+fn create_session(user: &str, role: crate::users::Role) -> String {
     let token: String = OsRng
         .sample_iter(&rand::distributions::Alphanumeric)
         .take(64)
@@ -445,6 +498,7 @@ fn create_session(user: &str) -> String {
         token.clone(),
         SessionInfo {
             user: user.to_string(),
+            role,
             last_active: now,
         },
     );
@@ -459,66 +513,56 @@ fn destroy_session(token: &str) {
 // --- Password helpers ---
 
 fn is_default_password() -> bool {
-    // TODO: wrap with tokio::task::spawn_blocking for high-concurrency deployments
-    match std::fs::read_to_string(ADMIN_PASSWORD_PATH) {
-        Ok(stored) => {
-            let stored = stored.trim();
-            if stored == DEFAULT_PASS {
-                return true;
-            }
-            if stored.starts_with("$argon2") {
-                if let Ok(parsed_hash) = PasswordHash::new(stored) {
-                    return Argon2::default()
-                        .verify_password(DEFAULT_PASS.as_bytes(), &parsed_hash)
-                        .is_ok();
-                }
-            }
-            false
-        }
-        Err(_) => true,
+    // An appliance is "not initialized" when either:
+    //   - users.yaml is absent AND admin.password is absent (brand-new install), OR
+    //   - the admin user (per users.yaml, or fallback admin.password) still
+    //     verifies the literal DEFAULT_PASS.
+    let file = crate::users::load_users();
+    if file.users.is_empty() {
+        // No users.yaml (and no admin.password to migrate from either) → first boot.
+        return true;
     }
+    // If any admin's stored hash verifies "quickfw", consider the appliance uninitialized.
+    for u in &file.users {
+        if u.role == crate::users::Role::Admin
+            && crate::users::verify_password(&u.password_hash, DEFAULT_PASS)
+        {
+            return true;
+        }
+    }
+    false
 }
 
 fn verify_credentials(user: &str, pass: &str) -> bool {
-    if user != DEFAULT_USER {
-        return false;
-    }
+    // Load users.yaml (with first-boot migration from admin.password).
+    let file = crate::users::load_users();
 
-    // TODO: wrap with tokio::task::spawn_blocking for high-concurrency deployments
-    let stored = std::fs::read_to_string(ADMIN_PASSWORD_PATH)
-        .map(|s| s.trim().to_string())
-        .unwrap_or_default();
-
-    if stored.is_empty() {
-        if pass == DEFAULT_PASS {
+    // Bootstrap corner case: both users.yaml and admin.password are empty.
+    // Accept the default admin/quickfw credential once so first-boot login
+    // can reach the forced-password-change screen.
+    if file.users.is_empty() {
+        if user == DEFAULT_USER && pass == DEFAULT_PASS {
             let _ = hash_and_store_password(DEFAULT_PASS);
             return true;
         }
         return false;
     }
 
-    if stored.starts_with("$argon2") {
-        match PasswordHash::new(&stored) {
-            Ok(parsed_hash) => Argon2::default()
-                .verify_password(pass.as_bytes(), &parsed_hash)
-                .is_ok(),
-            Err(_) => false,
-        }
-    } else {
-        // Legacy plaintext — verify and auto-migrate
-        if pass == stored {
-            let _ = hash_and_store_password(pass);
-            true
-        } else {
-            // Constant-time compare to avoid timing leak using subtle crate
+    match crate::users::find_user(&file, user) {
+        Some(u) => crate::users::verify_password(&u.password_hash, pass),
+        None => {
+            // Constant-time dummy compare to avoid leaking which users exist.
             use subtle::ConstantTimeEq;
-            let pass_bytes = pass.as_bytes();
-            let stored_bytes = stored.as_bytes();
-            let len = std::cmp::min(pass_bytes.len(), stored_bytes.len());
-            let _ = pass_bytes[..len].ct_eq(&stored_bytes[..len]);
+            let _ = pass.as_bytes().ct_eq(pass.as_bytes());
             false
         }
     }
+}
+
+/// Look up a user's role — used by the login handler to populate the
+/// session + login response.
+pub fn role_for_user(user: &str) -> Option<crate::users::Role> {
+    crate::users::find_user(&crate::users::load_users(), user).map(|u| u.role)
 }
 
 fn hash_and_store_password(password: &str) -> Result<(), Box<dyn std::error::Error>> {
@@ -600,6 +644,11 @@ struct LoginRequest {
 struct LoginResponse {
     token: String,
     expires_in_seconds: u64,
+    /// Authenticated user's username — so the SPA can show who's logged in.
+    username: String,
+    /// Authenticated user's role ("admin" | "operator" | "readonly") — so
+    /// the frontend can hide admin-only controls for non-admin users.
+    role: String,
 }
 
 async fn login(
@@ -617,7 +666,15 @@ async fn login(
         ));
     }
 
-    let token = create_session(&payload.username);
+    let role = tokio::task::spawn_blocking({
+        let u = payload.username.clone();
+        move || role_for_user(&u)
+    })
+    .await
+    .unwrap_or(None)
+    .unwrap_or(crate::users::Role::Readonly);
+
+    let token = create_session(&payload.username, role);
     let session_cookie = format!(
         "quickfw_session={}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age={}",
         token, SESSION_MAX_AGE
@@ -655,6 +712,8 @@ async fn login(
         Json(LoginResponse {
             token,
             expires_in_seconds: SESSION_MAX_AGE,
+            username: payload.username.clone(),
+            role: role.as_str().to_string(),
         }),
     ))
 }
@@ -729,21 +788,41 @@ async fn change_password(
     }
 
     let new_password = payload.new.clone();
-    // Convert error to String inside the closure so the closure returns a Send type.
-    tokio::task::spawn_blocking(move || hash_and_store_password(&new_password).map_err(|e| e.to_string()))
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": format!("Failed to store password: {}", e)})),
-            )
-        })?
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": format!("Failed to store password: {}", e)})),
-            )
-        })?;
+    // Update users.yaml (authoritative) and the legacy admin.password (kept
+    // in sync so any tool still reading it gets the current hash).
+    tokio::task::spawn_blocking(move || -> Result<(), String> {
+        let mut file = crate::users::load_users();
+        // If users.yaml is empty (pre-migration first boot), create admin.
+        if file.users.is_empty() {
+            let hash = crate::users::hash_password(&new_password)?;
+            file.users.push(crate::users::User {
+                username: DEFAULT_USER.to_string(),
+                password_hash: hash,
+                role: crate::users::Role::Admin,
+            });
+            crate::users::save_users(&file)?;
+        } else {
+            crate::users::set_password(&mut file, DEFAULT_USER, &new_password)
+                .map_err(|e| e.to_string())?;
+        }
+        // Best-effort sync of legacy admin.password so a rollback binary
+        // still works. Non-fatal.
+        let _ = hash_and_store_password(&new_password).map_err(|e| e.to_string());
+        Ok(())
+    })
+    .await
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Failed to store password: {}", e)})),
+        )
+    })?
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Failed to store password: {}", e)})),
+        )
+    })?;
 
     // Invalidate all existing sessions so stolen cookies are revoked
     {
@@ -810,7 +889,7 @@ mod tests {
             sessions.clear();
         }
 
-        let token = create_session("admin");
+        let token = create_session("admin", crate::users::Role::Admin);
         assert!(!token.is_empty());
 
         // Verify session exists
@@ -828,7 +907,7 @@ mod tests {
             sessions.clear();
         }
 
-        let token = create_session("admin");
+        let token = create_session("admin", crate::users::Role::Admin);
         destroy_session(&token);
 
         // Verify session is gone

@@ -185,3 +185,18 @@ export const authApi = {
     api.post('/api/auth/password', request),
   getWsToken: () => api.get('/api/auth/ws-token'),
 };
+
+/**
+ * Users API endpoints — admin-only (backend gates with require_role(Admin)).
+ */
+export interface UserDto { username: string; role: 'admin' | 'operator' | 'readonly' }
+export const usersApi = {
+  list: () => api.get<UserDto[]>('/api/users'),
+  create: (req: { username: string; password: string; role: string }) =>
+    api.post('/api/users', req),
+  delete: (username: string) => api.delete(`/api/users/${encodeURIComponent(username)}`),
+  setRole: (username: string, role: string) =>
+    api.post(`/api/users/${encodeURIComponent(username)}/role`, { role }),
+  setPassword: (username: string, password: string) =>
+    api.post(`/api/users/${encodeURIComponent(username)}/password`, { password }),
+};

@@ -169,11 +169,20 @@ const NAT_PATH: &str = "/etc/quickfw/nat.yaml";
 const SYSLOG_CONFIG_PATH: &str = "/etc/quickfw/syslog.yaml";
 
 pub async fn create_router() -> Router {
+    use axum::middleware;
+    // Destructive / infra-level routes — admin role required.
+    let admin_only = Router::new()
+        .route("/api/system/reboot", post(reboot_system))
+        .route("/api/system/factory-reset", post(factory_reset))
+        .route("/api/config/restore", post(restore_config_backup))
+        .route("/api/config/import", post(import_config))
+        .layer(middleware::from_fn(crate::auth::require_role(
+            crate::users::Role::Admin,
+        )));
+
     Router::new()
         .route("/api/system/info", get(get_system_info))
         .route("/api/system/traffic", get(get_traffic_snapshot))
-        .route("/api/system/reboot", post(reboot_system))
-        .route("/api/system/factory-reset", post(factory_reset))
         .route("/api/services", get(get_services))
         .route("/api/health", get(health_check)) // health endpoint
         .route("/api/interfaces", get(get_interfaces))
@@ -187,11 +196,10 @@ pub async fn create_router() -> Router {
         .route("/api/settings", post(save_settings))
         .route("/api/config/export", get(export_config))
         .route("/api/config/backups", get(get_config_backups))
-        .route("/api/config/restore", post(restore_config_backup))
-        .route("/api/config/import", post(import_config))
         .route("/api/conntrack", get(get_conntrack))
         .route("/api/syslog", get(get_syslog_config))
         .route("/api/syslog", post(save_syslog_config))
+        .merge(admin_only)
 }
 
 // Simple health check – returns 200 OK if the server is running.

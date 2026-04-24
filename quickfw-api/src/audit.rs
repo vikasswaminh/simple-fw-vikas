@@ -58,7 +58,7 @@ pub async fn audit_middleware(request: Request, next: Next) -> Response {
     let user = request
         .extensions()
         .get::<AuthUser>()
-        .map(|u| u.0.clone())
+        .map(|u| u.username.clone())
         .unwrap_or_default();
     let source_ip = request
         .extensions()

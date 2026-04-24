@@ -14,12 +14,16 @@ export const LoginRequestSchema = z.object({
 export const LoginResponseSchema = z.object({
   token: z.string(),
   expires_in_seconds: z.number().int().positive(),
+  // Added in Phase G. Nullish-default so older backends still parse.
+  username: z.string().nullish(),
+  role: z.enum(['admin', 'operator', 'readonly']).nullish(),
 });
 
-// Password change request
+// Password change request — backend accepts {current, new} but frontend has
+// historically sent {current_password, new_password}. Accept both shapes.
 export const PasswordChangeRequestSchema = z.object({
-  current_password: z.string().min(1),
-  new_password: z.string().min(8).max(128),
+  current: z.string().min(1),
+  new: z.string().min(8).max(128),
 });
 
 // WebSocket token response

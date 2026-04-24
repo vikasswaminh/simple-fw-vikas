@@ -10,4 +10,6 @@ pub mod routing_api;
 pub mod state;
 pub mod system;
 pub mod tools;
+pub mod users;
+pub mod users_api;
 pub mod validation;

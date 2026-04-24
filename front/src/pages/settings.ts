@@ -1,5 +1,6 @@
 import { Component } from '@components/component';
-import { systemApi, configApi, toolsApi, authApi } from '@api/endpoints';
+import { systemApi, configApi, toolsApi, authApi, usersApi } from '@api/endpoints';
+import type { UserDto } from '@api/endpoints';
 import { showToast } from '@components/toast';
 import { openModal, closeModal } from '@components/modal';
 import { escapeHtml } from '@utils';
@@ -8,6 +9,8 @@ export class SettingsPage extends Component<{
   settings: Record<string, unknown> | null;
   backups: Array<{ name: string; size: number }>;
   ntpStatus: Record<string, string> | null;
+  users: UserDto[];
+  usersError: string | null;
   loading: boolean;
   error: string | null;
   activeTab: 'general' | 'dns' | 'ntp' | 'backup' | 'admin' | 'syslog' | 'system';
@@ -16,6 +19,7 @@ export class SettingsPage extends Component<{
     super(element);
     this.state = {
       settings: null, backups: [], ntpStatus: null,
+      users: [], usersError: null,
       loading: true, error: null, activeTab: 'general',
     };
   }
@@ -79,6 +83,7 @@ export class SettingsPage extends Component<{
         const tab = btn.dataset.tab as typeof activeTab;
         this.setState({ activeTab: tab, error: null });
         if (tab === 'ntp') this.loadNtp();
+        if (tab === 'admin') this.loadUsers();
       });
     });
 
@@ -349,18 +354,61 @@ export class SettingsPage extends Component<{
   }
 
   private renderAdmin(): string {
+    const { users, usersError } = this.state;
     return `
-      <div style="max-width: 400px;">
-        <h4 style="margin-bottom: var(--spacing-md);">Change Admin Password</h4>
-        <form id="password-form">
-          <div class="form-group"><label class="form-label">Current Password</label><input type="password" name="current" class="form-input" required></div>
-          <div class="form-group"><label class="form-label">New Password</label><input type="password" name="new" class="form-input" required minlength="8"></div>
-          <div class="form-group"><label class="form-label">Confirm</label><input type="password" name="confirm" class="form-input" required minlength="8"></div>
-          <p style="color: var(--color-text-muted); font-size: var(--font-size-xs); margin-bottom: var(--spacing-md);">Min 8 characters.</p>
-          <button type="submit" class="btn btn-primary">Change Password</button>
-        </form>
+      <div class="grid-2" style="align-items: start;">
+        <div>
+          <h4 style="margin-bottom: var(--spacing-md);">Change My Password</h4>
+          <form id="password-form" style="max-width: 400px;">
+            <div class="form-group"><label class="form-label">Current Password</label><input type="password" name="current" class="form-input" required></div>
+            <div class="form-group"><label class="form-label">New Password</label><input type="password" name="new" class="form-input" required minlength="8"></div>
+            <div class="form-group"><label class="form-label">Confirm</label><input type="password" name="confirm" class="form-input" required minlength="8"></div>
+            <p style="color: var(--color-text-muted); font-size: var(--font-size-xs); margin-bottom: var(--spacing-md);">Min 8 characters.</p>
+            <button type="submit" class="btn btn-primary">Change Password</button>
+          </form>
+        </div>
+        <div>
+          <h4 style="margin-bottom: var(--spacing-md);">Users</h4>
+          ${usersError ? `<p style="color: var(--color-text-muted); font-size: var(--font-size-sm); margin-bottom: var(--spacing-md);">${escapeHtml(usersError)}</p>` : `
+          <div class="table-container" style="margin-bottom: var(--spacing-md);">
+            <table class="table">
+              <thead><tr><th>Username</th><th>Role</th><th></th></tr></thead>
+              <tbody>
+                ${users.length > 0 ? users.map(u => `
+                  <tr>
+                    <td><strong>${escapeHtml(u.username)}</strong></td>
+                    <td>
+                      <select class="form-select" style="width: 130px; padding: 4px 8px;" data-set-role="${escapeHtml(u.username)}">
+                        <option value="admin"    ${u.role === 'admin' ? 'selected' : ''}>Admin</option>
+                        <option value="operator" ${u.role === 'operator' ? 'selected' : ''}>Operator</option>
+                        <option value="readonly" ${u.role === 'readonly' ? 'selected' : ''}>Readonly</option>
+                      </select>
+                    </td>
+                    <td><div class="actions">
+                      <button class="btn-icon" title="Reset password" data-reset-pw="${escapeHtml(u.username)}">🔑</button>
+                      <button class="btn-icon danger" title="Delete user" data-delete-user="${escapeHtml(u.username)}">🗑</button>
+                    </div></td>
+                  </tr>
+                `).join('') : '<tr><td colspan="3" style="color: var(--color-text-muted);">No users</td></tr>'}
+              </tbody>
+            </table>
+          </div>
+          <button class="btn btn-primary" id="add-user-btn">+ Add User</button>`}
+        </div>
       </div>
     `;
+  }
+
+  private async loadUsers(): Promise<void> {
+    try {
+      const users = await usersApi.list();
+      this.setState({ users, usersError: null });
+    } catch {
+      // 403 expected for non-admin callers — we surface a gentle message
+      // rather than an error. The field is an unknown shape at this
+      // layer (ApiError's shape is hidden); treat any list failure the same.
+      this.setState({ users: [], usersError: 'Only admins can manage users.' });
+    }
   }
 
   private bindAdminForm(): void {
@@ -370,11 +418,97 @@ export class SettingsPage extends Component<{
       const newPw = fd.get('new') as string;
       if (newPw !== fd.get('confirm')) { showToast('Passwords do not match', 'error'); return; }
       try {
-        await authApi.changePassword({ current_password: fd.get('current') as string, new_password: newPw });
+        await authApi.changePassword({ current: fd.get('current') as string, new: newPw });
         showToast('Password changed', 'success');
         (e.target as HTMLFormElement).reset();
       } catch { showToast('Failed to change password', 'error'); }
     });
+
+    this.$<HTMLButtonElement>('#add-user-btn')?.addEventListener('click', () => this.openAddUserModal());
+    this.$$<HTMLSelectElement>('[data-set-role]').forEach(sel => {
+      sel.addEventListener('change', () => this.changeUserRole(sel.dataset.setRole!, sel.value));
+    });
+    this.$$<HTMLButtonElement>('[data-reset-pw]').forEach(btn => {
+      btn.addEventListener('click', () => this.openResetPasswordModal(btn.dataset.resetPw!));
+    });
+    this.$$<HTMLButtonElement>('[data-delete-user]').forEach(btn => {
+      btn.addEventListener('click', () => this.deleteUser(btn.dataset.deleteUser!));
+    });
+  }
+
+  private openAddUserModal(): void {
+    openModal({
+      title: '+ Add User',
+      body: `
+        <div class="form-group"><label class="form-label">Username</label><input type="text" class="form-input" id="new-user-username" maxlength="32"></div>
+        <div class="form-group"><label class="form-label">Password</label><input type="password" class="form-input" id="new-user-password" minlength="8"></div>
+        <div class="form-group"><label class="form-label">Role</label>
+          <select class="form-select" id="new-user-role">
+            <option value="operator">Operator (can edit firewall/NAT/routing)</option>
+            <option value="admin">Admin (full control)</option>
+            <option value="readonly">Readonly (view only)</option>
+          </select>
+        </div>
+      `,
+      footer: `<button class="btn btn-secondary" data-modal-close>Cancel</button><button class="btn btn-primary" data-modal-submit>Create</button>`,
+      onSubmit: async () => {
+        const modal = document.querySelector('.modal');
+        const username = (modal?.querySelector('#new-user-username') as HTMLInputElement)?.value.trim();
+        const password = (modal?.querySelector('#new-user-password') as HTMLInputElement)?.value;
+        const role = (modal?.querySelector('#new-user-role') as HTMLSelectElement)?.value;
+        if (!username || !password) { showToast('Username and password required', 'error'); return; }
+        try {
+          await usersApi.create({ username, password, role });
+          showToast(`User ${username} created`, 'success');
+          closeModal();
+          this.loadUsers();
+        } catch { showToast('Failed to create user (check password strength / duplicate username)', 'error'); }
+      },
+    });
+  }
+
+  private openResetPasswordModal(username: string): void {
+    openModal({
+      title: `Reset password: ${username}`,
+      body: `
+        <p style="color: var(--color-text-secondary); margin-bottom: var(--spacing-md);">
+          Set a new password for ${escapeHtml(username)}. Min 8 characters.
+        </p>
+        <div class="form-group"><label class="form-label">New Password</label><input type="password" class="form-input" id="reset-user-pw" minlength="8"></div>
+      `,
+      footer: `<button class="btn btn-secondary" data-modal-close>Cancel</button><button class="btn btn-primary" data-modal-submit>Set</button>`,
+      onSubmit: async () => {
+        const modal = document.querySelector('.modal');
+        const pw = (modal?.querySelector('#reset-user-pw') as HTMLInputElement)?.value;
+        if (!pw) { showToast('Password required', 'error'); return; }
+        try {
+          await usersApi.setPassword(username, pw);
+          showToast(`Password updated for ${username}`, 'success');
+          closeModal();
+        } catch { showToast('Failed to set password', 'error'); }
+      },
+    });
+  }
+
+  private async changeUserRole(username: string, role: string): Promise<void> {
+    try {
+      await usersApi.setRole(username, role);
+      showToast(`${username} role -> ${role}`, 'success');
+      this.loadUsers();
+    } catch {
+      showToast(`Failed to set ${username} role (protected user?)`, 'error');
+      this.loadUsers();
+    }
+  }
+
+  private async deleteUser(username: string): Promise<void> {
+    try {
+      await usersApi.delete(username);
+      showToast(`User ${username} deleted`, 'success');
+      this.loadUsers();
+    } catch {
+      showToast(`Failed to delete ${username}`, 'error');
+    }
   }
 
   private renderSyslog(): string {
