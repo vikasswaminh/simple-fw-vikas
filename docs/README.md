@@ -7,6 +7,8 @@
 - **[UPGRADE.md](UPGRADE.md)** — A/B slot upgrade mechanics,
   signature model, rollback options.
 - **[API.md](API.md)** — full REST API reference.
+- **[ROADMAP.md](ROADMAP.md)** — deferred infrastructure work,
+  nice-to-have improvements, and explicit non-goals.
 
 For a high-level architecture overview see [CLAUDE.md](../CLAUDE.md)
 at the repo root.
