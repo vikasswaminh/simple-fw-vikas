@@ -91,14 +91,22 @@ export function formatMacAddress(mac: string): string {
 }
 
 /**
- * Escape HTML entities
+ * Escape HTML entities for safe interpolation into HTML.
+ *
+ * Escapes `& < > " '` so the result is safe both in body context
+ * (`<div>${x}</div>`) and attribute context (`<div title="${x}">`). The
+ * previous implementation relied on the textContent → innerHTML browser
+ * trick, which only escapes `& < >` — attributes with user-controlled
+ * strings containing `"` would break out of the quoting.
  */
 export function escapeHtml(text: string): string {
   if (!text) return '';
-
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 /**

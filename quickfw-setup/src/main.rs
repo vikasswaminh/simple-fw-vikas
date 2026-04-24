@@ -506,3 +506,51 @@ fn drop_to_cli() {
             .status();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn password_too_short_rejected() {
+        assert!(check_password_strength("Ab1").is_err());
+        assert!(check_password_strength("Abc12345678").is_err()); // 11 chars
+        assert!(check_password_strength("").is_err());
+    }
+
+    #[test]
+    fn password_missing_char_class_rejected() {
+        // Missing uppercase
+        assert!(check_password_strength("alllower123456").is_err());
+        // Missing lowercase
+        assert!(check_password_strength("ALLUPPER123456").is_err());
+        // Missing digit
+        assert!(check_password_strength("NoDigitsInThisOne").is_err());
+    }
+
+    #[test]
+    fn password_with_weak_phrase_rejected() {
+        for bad in ["MyAdminPass123", "Password12345!", "qUickfw-abcdE1"] {
+            assert!(
+                check_password_strength(bad).is_err(),
+                "expected reject for {}",
+                bad
+            );
+        }
+    }
+
+    #[test]
+    fn password_strong_accepted() {
+        assert!(check_password_strength("Xy9#k2MpQr7Lv").is_ok());
+        assert!(check_password_strength("Mountain2026Breeze!").is_ok());
+        assert!(check_password_strength("Zebra-Tango-9x-Plum").is_ok());
+    }
+
+    #[test]
+    fn password_case_insensitivity_on_weak_list() {
+        // "QUICKFW" uppercase still blocked
+        assert!(check_password_strength("QUICKFWisBad1234").is_err());
+        // "PassWORD" mixed case still blocked
+        assert!(check_password_strength("MyPassWORDabc12").is_err());
+    }
+}

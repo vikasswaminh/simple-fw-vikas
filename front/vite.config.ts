@@ -1,8 +1,17 @@
+/// <reference types="vitest" />
 import { defineConfig } from 'vite';
 import { resolve } from 'path';
 
 export default defineConfig({
   root: 'src',
+  // Vitest config — lives here so we don't need a separate vitest.config.ts.
+  // happy-dom gives us window/document without the weight of jsdom, which is
+  // what escapeHtml() and every page component depend on.
+  test: {
+    environment: 'happy-dom',
+    globals: false,
+    include: ['**/*.test.ts'],
+  },
   build: {
     outDir: '../dist',
     emptyOutDir: true,

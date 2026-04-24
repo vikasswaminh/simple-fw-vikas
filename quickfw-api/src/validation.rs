@@ -415,4 +415,93 @@ mod tests {
             );
         }
     }
+
+    // --- SNAT rule validation (Phase C) ---
+
+    #[test]
+    fn snat_rule_valid_shapes() {
+        // With out_interface
+        assert!(validate_snat_rule(&gfw_io::nat::SnatRule {
+            source_cidr: "10.10.0.0/24".to_string(),
+            to_address: "203.0.113.5".to_string(),
+            out_interface: "eth0".to_string(),
+        })
+        .is_ok());
+        // Without out_interface (empty string = unset)
+        assert!(validate_snat_rule(&gfw_io::nat::SnatRule {
+            source_cidr: "192.168.5.0/24".to_string(),
+            to_address: "198.51.100.1".to_string(),
+            out_interface: "".to_string(),
+        })
+        .is_ok());
+    }
+
+    #[test]
+    fn snat_rule_rejects_injection_in_cidr() {
+        let bad = gfw_io::nat::SnatRule {
+            source_cidr: "10.0.0.0/24; reboot".to_string(),
+            to_address: "10.0.0.1".to_string(),
+            out_interface: "eth0".to_string(),
+        };
+        assert!(validate_snat_rule(&bad).is_err());
+    }
+
+    #[test]
+    fn snat_rule_rejects_invalid_to_address() {
+        let bad = gfw_io::nat::SnatRule {
+            source_cidr: "10.0.0.0/24".to_string(),
+            to_address: "not-an-ip".to_string(),
+            out_interface: "eth0".to_string(),
+        };
+        assert!(validate_snat_rule(&bad).is_err());
+
+        let bad2 = gfw_io::nat::SnatRule {
+            source_cidr: "10.0.0.0/24".to_string(),
+            to_address: "$(whoami)".to_string(),
+            out_interface: "".to_string(),
+        };
+        assert!(validate_snat_rule(&bad2).is_err());
+    }
+
+    #[test]
+    fn snat_rule_rejects_bad_interface() {
+        let bad = gfw_io::nat::SnatRule {
+            source_cidr: "10.0.0.0/24".to_string(),
+            to_address: "10.0.0.1".to_string(),
+            out_interface: "eth0; rm -rf /".to_string(),
+        };
+        assert!(validate_snat_rule(&bad).is_err());
+    }
+
+    #[test]
+    fn nat_config_with_snat_roundtrip_validation() {
+        // A mixed config — masquerade + port_forward + snat all valid.
+        let config = gfw_io::nat::NatConfig {
+            masquerade: vec![gfw_io::nat::MasqueradeRule {
+                out_interface: "eth0".to_string(),
+                source_cidr: "192.168.1.0/24".to_string(),
+            }],
+            port_forward: vec![gfw_io::nat::PortForwardRule {
+                in_interface: "eth0".to_string(),
+                protocol: "tcp".to_string(),
+                dest_port: 8080,
+                forward_to: "192.168.1.100:80".to_string(),
+            }],
+            snat: vec![gfw_io::nat::SnatRule {
+                source_cidr: "10.10.0.0/24".to_string(),
+                to_address: "203.0.113.5".to_string(),
+                out_interface: "eth0".to_string(),
+            }],
+        };
+        assert!(validate_nat_config(&config).is_ok());
+
+        // Injecting a bad snat rule should fail the whole config.
+        let mut bad = config.clone();
+        bad.snat.push(gfw_io::nat::SnatRule {
+            source_cidr: "bogus".to_string(),
+            to_address: "10.0.0.1".to_string(),
+            out_interface: "eth0".to_string(),
+        });
+        assert!(validate_nat_config(&bad).is_err());
+    }
 }

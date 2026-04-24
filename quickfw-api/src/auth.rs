@@ -884,4 +884,101 @@ mod tests {
         let now2 = unix_now();
         assert!(now2 >= now1);
     }
+
+    // --- CSRF double-submit tests ---
+    // Build axum::Request values by hand and assert csrf_check's decisions.
+    // These are critical-path: a regression here silently disables CSRF.
+
+    fn req(method: &str, cookie: Option<&str>, header: Option<&str>) -> Request {
+        let mut builder = axum::http::Request::builder()
+            .method(method)
+            .uri("http://localhost/api/firewall");
+        if let Some(c) = cookie {
+            builder = builder.header(header::COOKIE, c);
+        }
+        if let Some(h) = header {
+            builder = builder.header("x-csrf-token", h);
+        }
+        builder.body(axum::body::Body::empty()).unwrap()
+    }
+
+    #[test]
+    fn csrf_check_passes_on_safe_methods() {
+        // GET / HEAD / OPTIONS never require CSRF — they can't mutate state.
+        for m in ["GET", "HEAD", "OPTIONS"] {
+            assert!(
+                csrf_check(&req(m, None, None), "/api/firewall"),
+                "{} should bypass CSRF",
+                m
+            );
+        }
+    }
+
+    #[test]
+    fn csrf_check_passes_on_bootstrap_auth_paths() {
+        // These paths can't have a CSRF cookie yet — login issues it.
+        for path in ["/api/auth/login", "/api/auth/password", "/api/auth/logout"] {
+            assert!(
+                csrf_check(&req("POST", None, None), path),
+                "{} should be exempt from CSRF",
+                path
+            );
+        }
+    }
+
+    #[test]
+    fn csrf_check_rejects_post_without_cookie() {
+        // POST with a header but no cookie — attacker has a guessed header
+        // value but can't read the cookie → must be rejected.
+        assert!(!csrf_check(
+            &req("POST", None, Some("some-random-token")),
+            "/api/firewall"
+        ));
+    }
+
+    #[test]
+    fn csrf_check_rejects_post_without_header() {
+        // Browser happens to send the cookie but no X-CSRF-Token — classic
+        // CSRF attack vector (cross-origin form submit). Must reject.
+        assert!(!csrf_check(
+            &req("POST", Some("quickfw_csrf=abc123"), None),
+            "/api/firewall"
+        ));
+    }
+
+    #[test]
+    fn csrf_check_rejects_mismatched_tokens() {
+        // Cookie and header both present but differ — either a stale cookie
+        // or an attacker substituting a known-value header.
+        assert!(!csrf_check(
+            &req("POST", Some("quickfw_csrf=abc"), Some("xyz")),
+            "/api/firewall"
+        ));
+    }
+
+    #[test]
+    fn csrf_check_accepts_matching_tokens() {
+        assert!(csrf_check(
+            &req(
+                "POST",
+                Some("quickfw_csrf=abc123; quickfw_session=xyz"),
+                Some("abc123")
+            ),
+            "/api/firewall"
+        ));
+    }
+
+    #[test]
+    fn csrf_check_rejects_empty_strings() {
+        // An empty header string with a non-empty cookie must not be treated
+        // as a valid equal-length compare. Same for an empty cookie value.
+        assert!(!csrf_check(
+            &req("POST", Some("quickfw_csrf=abc"), Some("")),
+            "/api/firewall"
+        ));
+        assert!(!csrf_check(
+            &req("POST", Some("quickfw_csrf="), Some("abc")),
+            "/api/firewall"
+        ));
+    }
 }
