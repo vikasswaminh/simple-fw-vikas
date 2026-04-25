@@ -49,7 +49,7 @@ rm -f "$PIDFILE" "$MONITOR" "$SERIAL_SOCK"
 ACCEL_ARGS="-enable-kvm -cpu host"
 [[ ! -w /dev/kvm ]] && ACCEL_ARGS=""
 
-KERNEL_APPEND="boot=live components hostname=quickfw toram console=ttyS0,115200"
+KERNEL_APPEND="boot=live components hostname=quickfw toram console=ttyS0,115200 quiet loglevel=3 systemd.show_status=false rd.systemd.show_status=false"
 
 : > "$SERIAL_LOG"
 

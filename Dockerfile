@@ -53,7 +53,7 @@ RUN lb config \
     --debian-installer-gui false \
     --memtest none \
     --apt-recommends false \
-    --bootappend-live "boot=live components hostname=quickfw toram" \
+    --bootappend-live "boot=live components hostname=quickfw toram quiet loglevel=3 systemd.show_status=false rd.systemd.show_status=false vt.global_cursor_default=0" \
     --iso-application "QuickFW Firewall Appliance" \
     --iso-volume "QuickFW"
 
@@ -156,13 +156,19 @@ label quickfw
 	menu default
 	linux /live/vmlinuz
 	initrd /live/initrd.img
-	append boot=live components hostname=quickfw toram
+	append boot=live components hostname=quickfw toram quiet loglevel=3 systemd.show_status=false rd.systemd.show_status=false vt.global_cursor_default=0
 
 label quickfw-safe
 	menu label QuickFW (Safe Mode)
 	linux /live/vmlinuz
 	initrd /live/initrd.img
 	append boot=live components memtest noapic noapm nodma nomce nolapic nosmp nosplash vga=788
+
+label quickfw-verbose
+	menu label QuickFW (Verbose — show all kernel messages)
+	linux /live/vmlinuz
+	initrd /live/initrd.img
+	append boot=live components hostname=quickfw toram debug
 LIVECFG
 
 RUN cat > config/bootloaders/isolinux/stdmenu.cfg << 'STDCFG'
