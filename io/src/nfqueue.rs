@@ -587,11 +587,10 @@ impl PacketIO for NFQueuePacketIO {
                     }
 
                     let packet = NFQueuePacket {
-                        //id: packet_id,
                         stream_id: ct.map(|c| c.get_id()).unwrap_or(0),
+                        // We use the wallclock arrival time, not msg.get_timestamp()
+                        // — the latter panics in some kernel/queue configs.
                         timestamp: SystemTime::now(),
-                        // TODO: fix the panic caused by get_timestamp()
-                        // msg.get_timestamp().unwrap_or_else(SystemTime::now)
                         data: payload.to_vec(),
                         msg,
                     };

@@ -1,20 +1,27 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { api, ApiError } from './client';
 
-// Capture the last fetch call for assertion.
+// Capture the last fetch call for assertion. Typed to match the fetch
+// signature so vi.fn().mock.calls indexes correctly.
+type FetchArgs = Parameters<typeof fetch>;
 function mockFetch(response: {
   status?: number;
   ok?: boolean;
   json?: unknown;
   text?: string;
 }) {
-  return vi.fn(async () => ({
+  return vi.fn<FetchArgs, Promise<Response>>(async () => ({
     ok: response.ok ?? true,
     status: response.status ?? 200,
     statusText: response.status === 401 ? 'Unauthorized' : 'OK',
     json: async () => response.json ?? {},
     text: async () => response.text ?? '',
-  }));
+  } as unknown as Response));
+}
+
+// Helper: pull the RequestInit out of a fetch call without TS friction.
+function callInit<T extends ReturnType<typeof mockFetch>>(m: T, n = 0): RequestInit {
+  return (m.mock.calls[n]?.[1] ?? {}) as RequestInit;
 }
 
 describe('ApiClient — CSRF double-submit header', () => {
@@ -35,8 +42,7 @@ describe('ApiClient — CSRF double-submit header', () => {
     await api.get('/api/whatever');
 
     expect(fetchMock).toHaveBeenCalledOnce();
-    const opts = fetchMock.mock.calls[0][1] as RequestInit;
-    const headers = opts.headers as Record<string, string>;
+    const headers = callInit(fetchMock).headers as Record<string, string>;
     expect(headers['X-CSRF-Token']).toBeUndefined();
   });
 
@@ -47,7 +53,7 @@ describe('ApiClient — CSRF double-submit header', () => {
 
     await api.post('/api/firewall', { rules: [] });
 
-    const opts = fetchMock.mock.calls[0][1] as RequestInit;
+    const opts = callInit(fetchMock);
     const headers = opts.headers as Record<string, string>;
     expect(headers['X-CSRF-Token']).toBe('abc123');
     expect(opts.method).toBe('POST');
@@ -61,8 +67,7 @@ describe('ApiClient — CSRF double-submit header', () => {
 
     await api.post('/api/firewall', { rules: [] });
 
-    const opts = fetchMock.mock.calls[0][1] as RequestInit;
-    const headers = opts.headers as Record<string, string>;
+    const headers = callInit(fetchMock).headers as Record<string, string>;
     expect(headers['X-CSRF-Token']).toBeUndefined();
   });
 
@@ -72,11 +77,11 @@ describe('ApiClient — CSRF double-submit header', () => {
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
     await api.delete('/api/nat/snat/1');
-    let headers = fetchMock.mock.calls[0][1].headers as Record<string, string>;
+    let headers = callInit(fetchMock, 0).headers as Record<string, string>;
     expect(headers['X-CSRF-Token']).toBe('xyz789');
 
     await api.put('/api/thing/1', { x: 1 });
-    headers = fetchMock.mock.calls[1][1].headers as Record<string, string>;
+    headers = callInit(fetchMock, 1).headers as Record<string, string>;
     expect(headers['X-CSRF-Token']).toBe('xyz789');
   });
 
@@ -89,7 +94,7 @@ describe('ApiClient — CSRF double-submit header', () => {
 
     await api.post('/api/firewall', {});
 
-    const headers = fetchMock.mock.calls[0][1].headers as Record<string, string>;
+    const headers = callInit(fetchMock).headers as Record<string, string>;
     expect(headers['X-CSRF-Token']).toBe('the-csrf');
   });
 });

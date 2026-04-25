@@ -4,7 +4,6 @@
 //! and dnsmasq config generation for DHCP/DNS on the LAN.
 
 use std::fs;
-use std::net::Ipv4Addr;
 use std::process::Command;
 
 use serde::{Deserialize, Serialize};

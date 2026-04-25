@@ -1,0 +1,182 @@
+#!/bin/bash
+# QuickFW disk installer (Phase H follow-up).
+#
+# Run from inside the live ISO to install QuickFW onto a target disk with the
+# A/B + persistent layout that quickfw-upgrade and quickfw-persist-mount expect:
+#
+#   ESP                                ~ 256 MiB  (FAT32, GRUB)
+#   QUICKFW_A                          ~ 2 GiB    (ext4, root slot A)
+#   QUICKFW_B                          ~ 2 GiB    (ext4, root slot B)
+#   QUICKFW_PERSIST                    rest       (ext4, /etc/quickfw + logs)
+#
+# After install + reboot, the appliance boots from QUICKFW_A by default.
+# QUICKFW_B is empty until the first `quickfw-upgrade apply` writes to it.
+#
+# Usage:   quickfw-install /dev/sda
+#          quickfw-install /dev/sda --yes        (skip the destructive confirm)
+#
+# Requires: sgdisk, mkfs.ext4, mkfs.vfat, grub-install, dd. All present in the
+# live ISO's package list.
+
+set -euo pipefail
+
+if [[ $EUID -ne 0 ]]; then
+  echo "ERROR: must run as root" >&2
+  exit 1
+fi
+
+TARGET="${1:-}"
+SKIP_CONFIRM=""
+[[ "${2:-}" == "--yes" ]] && SKIP_CONFIRM=1
+
+if [[ -z "$TARGET" || ! -b "$TARGET" ]]; then
+  cat >&2 <<EOF
+Usage: quickfw-install <target-disk> [--yes]
+
+Target disks visible on this system:
+EOF
+  lsblk -dn -o NAME,SIZE,MODEL | sed 's|^|  /dev/|' >&2
+  exit 2
+fi
+
+# Sanity: refuse to clobber the disk we booted from. If TARGET hosts the live
+# rootfs (loop device) or the ISO mount, abort.
+ROOT_SRC="$(findmnt -no SOURCE /)"
+if [[ "$ROOT_SRC" == "$TARGET"* ]]; then
+  echo "ERROR: $TARGET appears to be the disk we booted from. Aborting." >&2
+  exit 3
+fi
+
+cat <<EOF
+
+╔══════════════════════════════════════════════════════════════════╗
+║  QuickFW Installer                                              ║
+╠══════════════════════════════════════════════════════════════════╣
+║  Target disk: $TARGET
+║  Layout:      ESP (256 MiB) + QUICKFW_A (2 GiB) + QUICKFW_B (2 GiB) + QUICKFW_PERSIST (rest)
+║  THIS WILL DESTROY ALL DATA ON $TARGET.
+╚══════════════════════════════════════════════════════════════════╝
+
+EOF
+
+if [[ -z "$SKIP_CONFIRM" ]]; then
+  read -p "Type 'yes' to proceed: " confirm
+  [[ "$confirm" == "yes" ]] || { echo "Aborted."; exit 0; }
+fi
+
+echo "[1/7] Wiping partition table..."
+sgdisk --zap-all "$TARGET" >/dev/null
+
+echo "[2/7] Creating partitions..."
+sgdisk \
+  --new=1:0:+256M --typecode=1:ef00 --change-name=1:"EFI" \
+  --new=2:0:+2G   --typecode=2:8300 --change-name=2:"QUICKFW_A" \
+  --new=3:0:+2G   --typecode=3:8300 --change-name=3:"QUICKFW_B" \
+  --new=4:0:0     --typecode=4:8300 --change-name=4:"QUICKFW_PERSIST" \
+  "$TARGET" >/dev/null
+partprobe "$TARGET"
+sleep 1
+
+# Resolve partition device names (sda → sda1, nvme0n1 → nvme0n1p1).
+case "$TARGET" in
+  *nvme*|*mmcblk*) PARTSEP="p" ;;
+  *) PARTSEP="" ;;
+esac
+ESP="${TARGET}${PARTSEP}1"
+SLOT_A="${TARGET}${PARTSEP}2"
+SLOT_B="${TARGET}${PARTSEP}3"
+PERSIST="${TARGET}${PARTSEP}4"
+
+echo "[3/7] Formatting ESP ($ESP)..."
+mkfs.vfat -F32 -n EFI "$ESP" >/dev/null
+
+echo "[4/7] Formatting slot A ($SLOT_A) and PERSIST ($PERSIST)..."
+mkfs.ext4 -F -L QUICKFW_A "$SLOT_A" >/dev/null
+mkfs.ext4 -F -L QUICKFW_B "$SLOT_B" >/dev/null
+mkfs.ext4 -F -L QUICKFW_PERSIST "$PERSIST" >/dev/null
+
+echo "[5/7] Copying live rootfs onto slot A..."
+mkdir -p /mnt/qfw-a /mnt/qfw-esp /mnt/qfw-persist
+mount "$SLOT_A" /mnt/qfw-a
+mount "$ESP" /mnt/qfw-esp
+mount "$PERSIST" /mnt/qfw-persist
+
+# Copy everything from the live root, excluding things that should not be
+# baked into the slot (kernel-temp, the live /persist tree, the install
+# target itself, virtual filesystems).
+rsync -aHAX --info=progress2 \
+  --exclude=/proc \
+  --exclude=/sys \
+  --exclude=/dev \
+  --exclude=/run \
+  --exclude=/tmp \
+  --exclude=/mnt \
+  --exclude=/media \
+  --exclude=/lost+found \
+  --exclude=/persist \
+  / /mnt/qfw-a/
+
+# Make sure the new root has the standard mountpoint dirs.
+mkdir -p /mnt/qfw-a/{proc,sys,dev,run,tmp,mnt,media,persist}
+
+echo "[6/7] Seeding /persist from /etc/quickfw..."
+mkdir -p /mnt/qfw-persist/etc/quickfw /mnt/qfw-persist/var/log/quickfw
+if [[ -d /etc/quickfw ]]; then
+  cp -a /etc/quickfw/. /mnt/qfw-persist/etc/quickfw/
+fi
+touch /mnt/qfw-persist/etc/quickfw/.seeded
+
+echo "[7/7] Installing GRUB with two slot entries..."
+mount --bind /dev  /mnt/qfw-a/dev
+mount --bind /proc /mnt/qfw-a/proc
+mount --bind /sys  /mnt/qfw-a/sys
+mount "$ESP" /mnt/qfw-a/boot/efi 2>/dev/null || true
+
+chroot /mnt/qfw-a grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=QuickFW
+
+# Custom GRUB menu with both slots — simple, unconditional. The watchdog uses
+# `grub-reboot` to flip the one-time default; this keeps both entries stable.
+cat > /mnt/qfw-a/etc/grub.d/40_quickfw_ab <<'GRUB'
+#!/bin/sh
+set -e
+cat <<EOF
+menuentry 'QuickFW (slot A)' --id quickfw-a {
+    search --no-floppy --label QUICKFW_A --set=root
+    linux  /boot/vmlinuz root=LABEL=QUICKFW_A ro
+    initrd /boot/initrd.img
+}
+menuentry 'QuickFW (slot B)' --id quickfw-b {
+    search --no-floppy --label QUICKFW_B --set=root
+    linux  /boot/vmlinuz root=LABEL=QUICKFW_B ro
+    initrd /boot/initrd.img
+}
+EOF
+GRUB
+chmod +x /mnt/qfw-a/etc/grub.d/40_quickfw_ab
+
+# Disable the auto-generated linux probes — we control the entries ourselves.
+chroot /mnt/qfw-a chmod -x /etc/grub.d/10_linux /etc/grub.d/20_linux_xen 2>/dev/null || true
+
+# Default to slot A on every reboot until quickfw-upgrade flips it.
+echo 'GRUB_DEFAULT=quickfw-a' >> /mnt/qfw-a/etc/default/grub
+echo 'GRUB_TIMEOUT=3'         >> /mnt/qfw-a/etc/default/grub
+
+chroot /mnt/qfw-a update-grub
+
+echo "[done] Cleaning up..."
+umount /mnt/qfw-a/boot/efi 2>/dev/null || true
+umount /mnt/qfw-a/dev /mnt/qfw-a/proc /mnt/qfw-a/sys
+umount /mnt/qfw-a /mnt/qfw-esp /mnt/qfw-persist
+sync
+
+cat <<EOF
+
+╔══════════════════════════════════════════════════════════════════╗
+║  Install complete.                                               ║
+║  Remove the installation media and reboot.                       ║
+║                                                                  ║
+║  Slot A is active. Slot B is blank — the first                   ║
+║  \`quickfw-upgrade apply <iso>\` will populate it.                 ║
+║  /persist holds your config; surviving every upgrade.            ║
+╚══════════════════════════════════════════════════════════════════╝
+EOF

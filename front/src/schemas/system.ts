@@ -38,41 +38,7 @@ export const SystemSettingsSchema = z.object({
   dns_servers: z.array(z.string().ip()),
 });
 
-// Syslog configuration
-export const SyslogConfigSchema = z.object({
-  enabled: z.boolean(),
-  remote_server: z.string().nullish(),
-  remote_port: z.number().int().min(1).max(65535).default(514),
-  local_logging: z.boolean().default(true),
-});
-
-// Config export
-export const ConfigExportSchema = z.object({
-  exported_at: z.string().datetime(),
-  settings: z.record(z.unknown()),
-  firewall: z.record(z.unknown()),
-  nat: z.record(z.unknown()),
-  roles: z.record(z.unknown()),
-  routes: z.record(z.unknown()),
-});
-
-// Backup info
-export const BackupInfoSchema = z.object({
-  name: z.string(),
-  size: z.number().int().nonnegative(),
-  created_at: z.string().datetime().nullish(),
-});
-
-// Reboot request
-export const RebootRequestSchema = z.object({
-  confirm_password: z.string().min(1),
-});
-
 // Export types
 export type SystemInfo = z.infer<typeof SystemInfoSchema>;
 export type TrafficSnapshot = z.infer<typeof TrafficSnapshotSchema>;
 export type SystemSettings = z.infer<typeof SystemSettingsSchema>;
-export type SyslogConfig = z.infer<typeof SyslogConfigSchema>;
-export type ConfigExport = z.infer<typeof ConfigExportSchema>;
-export type BackupInfo = z.infer<typeof BackupInfoSchema>;
-export type RebootRequest = z.infer<typeof RebootRequestSchema>;

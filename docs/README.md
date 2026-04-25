@@ -9,6 +9,9 @@
 - **[API.md](API.md)** — full REST API reference.
 - **[ROADMAP.md](ROADMAP.md)** — deferred infrastructure work,
   nice-to-have improvements, and explicit non-goals.
+- **[RELEASING.md](RELEASING.md)** — maintainer-facing release pipeline:
+  signing key setup, per-release build + sign flow, CI workflow,
+  key rotation.
 
 For a high-level architecture overview see [CLAUDE.md](../CLAUDE.md)
 at the repo root.

@@ -8,13 +8,9 @@ import {
   type TrafficSnapshot,
   type SystemSettings,
   // Network
-  InterfaceSchema,
-  InterfaceRolesConfigSchema,
-  StaticRoutesConfigSchema,
   type Interface,
   type InterfaceConfig,
   type InterfaceRolesConfig,
-  type StaticRoute,
   type StaticRoutesConfig,
   type DhcpLease,
   type ArpEntry,
@@ -28,17 +24,10 @@ import {
   // NAT
   NatConfigSchema,
   type NatConfig,
-  type MasqueradeRule,
-  type PortForwardRule,
   // Routing
-  OspfConfigSchema,
-  BgpConfigSchema,
   type OspfConfig,
   type BgpConfig,
-  type RipConfig,
-  type RouteEntry,
   type OspfNeighborStatus,
-  type BgpPeerStatus,
   // Audit
   AuditLogSchema,
   type AuditEntry,
@@ -76,7 +65,6 @@ export const systemApi = {
  */
 export const networkApi = {
   getInterfaces: () => api.get<{ interfaces: Interface[] }>('/api/interfaces'),
-  getInterface: (name: string) => api.get<Interface>(`/api/interfaces/${name}`),
   configure: (config: InterfaceConfig) => api.post('/api/interfaces/config', config),
   getRoles: () => api.get<InterfaceRolesConfig>('/api/interfaces/roles'),
   saveRoles: (roles: InterfaceRolesConfig) => api.post('/api/interfaces/roles', roles),

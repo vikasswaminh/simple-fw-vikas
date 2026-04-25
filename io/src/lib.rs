@@ -58,8 +58,6 @@ impl std::fmt::Debug for dyn Packet {
 
 /// The function to be called for each received packet.
 /// Return false to "unregister" and stop receiving packets.
-// pub type PacketCallback =
-//     Box<dyn Fn(Box<dyn Packet>, Option<Box<dyn Error + Send + Sync>>) -> bool + Send + Sync>;
 use std::future::Future;
 use std::pin::Pin;
 

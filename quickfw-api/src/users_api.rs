@@ -8,7 +8,6 @@ use axum::{
     extract::Path,
     http::StatusCode,
     middleware,
-    response::IntoResponse,
     routing::{delete, get, post},
     Json, Router,
 };

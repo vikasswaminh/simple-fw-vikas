@@ -424,30 +424,30 @@ fn set_root_password(password: &str) {
 }
 
 fn apply_default_firewall(_wan_iface: &str) {
-    let script = format!(r#"#!/usr/sbin/nft -f
+    let script = r#"#!/usr/sbin/nft -f
 add table inet quickfw
 flush table inet quickfw
 
-add chain inet quickfw MGMT_SAFETY {{ type filter hook input priority -200; policy accept; }}
+add chain inet quickfw MGMT_SAFETY { type filter hook input priority -200; policy accept; }
 flush chain inet quickfw MGMT_SAFETY
-add rule inet quickfw MGMT_SAFETY tcp dport {{ 22, 443, 3000 }} counter accept
+add rule inet quickfw MGMT_SAFETY tcp dport { 22, 443, 3000 } counter accept
 add rule inet quickfw MGMT_SAFETY meta l4proto icmp counter accept
 add rule inet quickfw MGMT_SAFETY meta l4proto icmpv6 counter accept
 
-add chain inet quickfw quickfw_input {{ type filter hook input priority -10; policy drop; }}
+add chain inet quickfw quickfw_input { type filter hook input priority -10; policy drop; }
 flush chain inet quickfw quickfw_input
 add rule inet quickfw quickfw_input ct state established,related accept
 add rule inet quickfw quickfw_input ct state invalid drop
 add rule inet quickfw quickfw_input iifname "lo" accept
 
-add chain inet quickfw quickfw_forward {{ type filter hook forward priority -10; policy drop; }}
+add chain inet quickfw quickfw_forward { type filter hook forward priority -10; policy drop; }
 flush chain inet quickfw quickfw_forward
 add rule inet quickfw quickfw_forward ct state established,related accept
 add rule inet quickfw quickfw_forward ct state invalid drop
 
-add chain inet quickfw quickfw_output {{ type filter hook output priority -10; policy accept; }}
+add chain inet quickfw quickfw_output { type filter hook output priority -10; policy accept; }
 flush chain inet quickfw quickfw_output
-"#);
+"#.to_string();
 
     let _ = Command::new("nft")
         .arg("-f")
@@ -462,9 +462,7 @@ flush chain inet quickfw quickfw_output
         });
 
     // Save firewall config YAML for the API server
-    let fw_yaml = format!(
-        "forward_policy: drop\ninput_policy: drop\noutput_policy: accept\nrules: []\nzones: []\n"
-    );
+    let fw_yaml = "forward_policy: drop\ninput_policy: drop\noutput_policy: accept\nrules: []\nzones: []\n".to_string();
     let _ = fs::write("/etc/quickfw/firewall.yaml", &fw_yaml);
 }
 

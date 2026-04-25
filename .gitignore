@@ -8,5 +8,10 @@ output/
 *.vmem
 *.lck
 *.dmp
+
+# Release signing material — the private key file. NEVER commit.
+*.key
+quickfw-release.key
+
 # Cargo.lock is intentionally tracked for reproducible builds of binaries
 # Cargo.lock

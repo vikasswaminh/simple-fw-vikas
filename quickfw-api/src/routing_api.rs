@@ -10,9 +10,9 @@ use axum::{
 use std::collections::HashMap;
 use tracing::{error, info, warn};
 
-use routing::{bgp, ospf, StaticRoutesConfig};
+use routing::{bgp, ospf};
 
-use crate::{state, validation};
+use crate::state;
 
 pub async fn create_router() -> Router {
     Router::new()

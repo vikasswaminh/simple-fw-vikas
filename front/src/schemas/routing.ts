@@ -138,17 +138,15 @@ export const ActiveProtocolsSchema = z.object({
   }),
 });
 
-// Export types
+// Export types — only those that have actual TypeScript consumers.
+// Internal schema components (BgpAddressFamilySchema, BgpNeighborAfSchema,
+// RipConfigSchema, BgpPeerStatusSchema, ActiveProtocolsSchema, RoutingTableSchema)
+// are still parsed by the BgpConfig / various API responses but don't need
+// their own type exports until UI code references them by name.
 export type OspfNetwork = z.infer<typeof OspfNetworkSchema>;
 export type OspfArea = z.infer<typeof OspfAreaSchema>;
 export type OspfConfig = z.infer<typeof OspfConfigSchema>;
 export type BgpNeighbor = z.infer<typeof BgpNeighborSchema>;
-export type BgpNeighborAf = z.infer<typeof BgpNeighborAfSchema>;
-export type BgpAddressFamily = z.infer<typeof BgpAddressFamilySchema>;
 export type BgpConfig = z.infer<typeof BgpConfigSchema>;
-export type RipConfig = z.infer<typeof RipConfigSchema>;
 export type RouteEntry = z.infer<typeof RouteEntrySchema>;
-export type RoutingTable = z.infer<typeof RoutingTableSchema>;
 export type OspfNeighborStatus = z.infer<typeof OspfNeighborStatusSchema>;
-export type BgpPeerStatus = z.infer<typeof BgpPeerStatusSchema>;
-export type ActiveProtocols = z.infer<typeof ActiveProtocolsSchema>;

@@ -2,7 +2,7 @@
 //! WebSocket token auth, and per-IP rate limiting.
 
 use argon2::{
-    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
+    password_hash::{PasswordHasher, SaltString},
     Argon2,
 };
 use axum::{

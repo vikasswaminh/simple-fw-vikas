@@ -9,6 +9,7 @@ members = [
   "quickfw-cli",
   "quickfw-setup",
   "quickfw-upgrade",
+  "quickfw-iso-sign",
 ]
 
 [workspace.dependencies]
