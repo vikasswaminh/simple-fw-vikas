@@ -60,17 +60,25 @@ jobs:
         # We don't fail the release on the pre-existing pcap test fixture
         # absence (it's #[ignore]'d on master, but defense-in-depth here).
 
-      - name: Install ISO build dependencies
+      - name: Verify Docker available
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            live-build debootstrap xorriso syslinux isolinux \
-            squashfs-tools dosfstools mtools
+          # build.sh uses Docker for reproducible ISO builds (live-build runs
+          # inside a Debian 12 container). GitHub-hosted ubuntu-22.04 runners
+          # have docker pre-installed; this is just a sanity check.
+          docker --version
+          docker info | head -5
 
       - name: Build ISO
         run: |
-          # build.sh produces output/quickfw-<version>.iso
+          # build.sh produces output/quickfw.iso. The CI run takes ~15-20 min
+          # because live-build pulls a full Debian rootfs.
           bash build.sh
+          ls -la output/
+          # Tag-rename the ISO to embed the release version.
+          if [ -f output/quickfw.iso ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+            mv output/quickfw.iso "output/quickfw-${VERSION}.iso"
+          fi
           ls -la output/
 
       - name: Sign ISO
