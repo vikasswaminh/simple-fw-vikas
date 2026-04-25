@@ -108,7 +108,8 @@ export class NatPage extends Component<{
 
   private async deleteMasquerade(idx: number): Promise<void> {
     try {
-      await natApi.deleteMasquerade(idx);
+      // Backend indexes are 1-based for delete (matches deleteSnat).
+      await natApi.deleteMasquerade(idx + 1);
       showToast('Rule deleted', 'success');
       this.loadData();
     } catch { showToast('Failed to delete', 'error'); }
@@ -116,7 +117,7 @@ export class NatPage extends Component<{
 
   private async deletePortForward(idx: number): Promise<void> {
     try {
-      await natApi.deletePortForward(idx);
+      await natApi.deletePortForward(idx + 1);
       showToast('Rule deleted', 'success');
       this.loadData();
     } catch { showToast('Failed to delete', 'error'); }

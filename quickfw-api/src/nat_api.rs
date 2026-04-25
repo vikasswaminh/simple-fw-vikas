@@ -87,10 +87,16 @@ async fn delete_masquerade(
     let _guard = state::config_lock().lock().await;
     let mut config = load_nat_config().unwrap_or_default();
 
-    if idx == 0 || idx > config.masquerade.len() {
+    if idx == 0 {
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": "Invalid index"})),
+            Json(serde_json::json!({"error": "Invalid index (must be >= 1)"})),
+        ));
+    }
+    if idx > config.masquerade.len() {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": format!("masquerade index {} out of range (have {} rules)", idx, config.masquerade.len())})),
         ));
     }
 
@@ -131,10 +137,16 @@ async fn delete_port_forward(
     let _guard = state::config_lock().lock().await;
     let mut config = load_nat_config().unwrap_or_default();
 
-    if idx == 0 || idx > config.port_forward.len() {
+    if idx == 0 {
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": "Invalid index"})),
+            Json(serde_json::json!({"error": "Invalid index (must be >= 1)"})),
+        ));
+    }
+    if idx > config.port_forward.len() {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": format!("port_forward index {} out of range (have {} rules)", idx, config.port_forward.len())})),
         ));
     }
 
@@ -175,10 +187,16 @@ async fn delete_snat(
     let _guard = state::config_lock().lock().await;
     let mut config = load_nat_config().unwrap_or_default();
 
-    if idx == 0 || idx > config.snat.len() {
+    if idx == 0 {
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": "Invalid index"})),
+            Json(serde_json::json!({"error": "Invalid index (must be >= 1)"})),
+        ));
+    }
+    if idx > config.snat.len() {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": format!("snat index {} out of range (have {} rules)", idx, config.snat.len())})),
         ));
     }
 

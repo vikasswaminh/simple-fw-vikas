@@ -231,6 +231,21 @@ export const authApi = {
  * Users API endpoints — admin-only (backend gates with require_role(Admin)).
  */
 export interface UserDto { username: string; role: 'admin' | 'operator' | 'readonly' }
+/**
+ * Syslog forwarding (Settings → Syslog).
+ */
+export interface SyslogConfig {
+  enabled: boolean;
+  server: string;
+  port: number;
+  protocol: 'udp' | 'tcp' | string;
+  facility?: string;
+}
+export const syslogApi = {
+  get: () => api.get<SyslogConfig>('/api/syslog'),
+  save: (config: SyslogConfig) => api.post('/api/syslog', config),
+};
+
 export const usersApi = {
   list: () => api.get<UserDto[]>('/api/users'),
   create: (req: { username: string; password: string; role: string }) =>

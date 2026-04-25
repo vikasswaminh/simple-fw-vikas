@@ -121,45 +121,66 @@ async fn get_groups() -> Json<FirewallGroups> {
 
 async fn save_groups(
     Json(groups): Json<FirewallGroups>,
-) -> Result<Json<&'static str>, StatusCode> {
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     let _guard = state::config_lock().lock().await;
-    // Validate group addresses and ports
+    // Validate group addresses and ports. Every error path returns a JSON body
+    // with the field name + reason so the UI can surface a useful message
+    // (the previous bare StatusCode left the UI showing "Failed to save"
+    // with no detail about which group/field was bad).
+    fn bad_request(detail: String) -> (StatusCode, Json<serde_json::Value>) {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "validation_failed", "detail": detail})),
+        )
+    }
+    fn server_error(detail: String) -> (StatusCode, Json<serde_json::Value>) {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "internal", "detail": detail})),
+        )
+    }
+
     for group in &groups.address_groups {
         if let Err(e) = validation::validate_rule_name(&group.name) {
             warn!("Address group name validation failed: {}", e);
-            return Err(StatusCode::BAD_REQUEST);
+            return Err(bad_request(format!("address group '{}' name: {}", group.name, e)));
         }
         for addr in &group.addresses {
             if let Err(e) = validation::validate_cidr(addr) {
                 warn!("Address group address validation failed: {}", e);
-                return Err(StatusCode::BAD_REQUEST);
+                return Err(bad_request(format!(
+                    "address group '{}' member '{}': {}", group.name, addr, e
+                )));
             }
         }
     }
     for group in &groups.port_groups {
         if let Err(e) = validation::validate_rule_name(&group.name) {
             warn!("Port group name validation failed: {}", e);
-            return Err(StatusCode::BAD_REQUEST);
+            return Err(bad_request(format!("port group '{}' name: {}", group.name, e)));
         }
         for port in &group.ports {
             if let Err(e) = validation::validate_port(port) {
                 warn!("Port group port validation failed: {}", e);
-                return Err(StatusCode::BAD_REQUEST);
+                return Err(bad_request(format!(
+                    "port group '{}' member '{}': {}", group.name, port, e
+                )));
             }
         }
     }
 
-    let yaml = serde_yaml::to_string(&groups).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let yaml = serde_yaml::to_string(&groups)
+        .map_err(|e| server_error(format!("serialize: {}", e)))?;
     std::fs::write(GROUPS_PATH, &yaml).map_err(|e| {
         error!("Failed to write firewall groups: {}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
+        server_error(format!("write: {}", e))
     })?;
     info!(
         "Firewall groups saved ({} addr, {} port)",
         groups.address_groups.len(),
         groups.port_groups.len()
     );
-    Ok(Json("Groups saved"))
+    Ok(Json(serde_json::json!({"message": "Groups saved"})))
 }
 
 /// Parse `nft list chain` output for rule hit counters.

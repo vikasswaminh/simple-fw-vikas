@@ -1,6 +1,6 @@
 import { Component } from '@components/component';
-import { systemApi, configApi, toolsApi, authApi, usersApi, firmwareApi } from '@api/endpoints';
-import type { UserDto } from '@api/endpoints';
+import { systemApi, configApi, toolsApi, authApi, usersApi, firmwareApi, syslogApi } from '@api/endpoints';
+import type { UserDto, SyslogConfig } from '@api/endpoints';
 import { showToast } from '@components/toast';
 import { openModal, closeModal } from '@components/modal';
 import { escapeHtml } from '@utils';
@@ -17,6 +17,7 @@ export class SettingsPage extends Component<{
   firmwareStatus: string;
   firmwareUploading: boolean;
   firmwareResult: string | null;
+  syslog: SyslogConfig | null;
 }> {
   constructor(element: HTMLElement | string) {
     super(element);
@@ -24,6 +25,7 @@ export class SettingsPage extends Component<{
       settings: null, backups: [], ntpStatus: null,
       users: [], usersError: null,
       firmwareStatus: '', firmwareUploading: false, firmwareResult: null,
+      syslog: null,
       loading: true, error: null, activeTab: 'general',
     };
   }
@@ -90,6 +92,7 @@ export class SettingsPage extends Component<{
         if (tab === 'ntp') this.loadNtp();
         if (tab === 'admin') this.loadUsers();
         if (tab === 'firmware') this.loadFirmwareStatus();
+        if (tab === 'syslog') this.loadSyslog();
       });
     });
 
@@ -100,6 +103,7 @@ export class SettingsPage extends Component<{
     if (activeTab === 'dns') this.bindDnsTab();
     if (activeTab === 'system') this.bindSystemTab();
     if (activeTab === 'firmware') this.bindFirmwareTab();
+    if (activeTab === 'syslog') this.bindSyslogTab();
   }
 
   private bindBackupTab(): void {
@@ -520,20 +524,57 @@ export class SettingsPage extends Component<{
   }
 
   private renderSyslog(): string {
+    const s = this.state.syslog ?? { enabled: false, server: '', port: 514, protocol: 'udp' };
     return `
       <div style="max-width: 500px;">
         <h4 style="margin-bottom: var(--spacing-md);">Syslog Forwarding</h4>
         <p style="color: var(--color-text-secondary); font-size: var(--font-size-sm); margin-bottom: var(--spacing-md);">
           Configure remote syslog server for log forwarding.
         </p>
-        <div class="form-group"><label class="form-label">Syslog Server</label><input type="text" class="form-input" placeholder="192.168.1.10"></div>
-        <div class="form-group"><label class="form-label">Port</label><input type="number" class="form-input" value="514" style="width: 100px;"></div>
-        <div class="form-group"><label class="form-label">Protocol</label>
-          <select class="form-select" style="width: 120px;"><option>UDP</option><option>TCP</option></select>
+        <div style="display: flex; align-items: center; gap: var(--spacing-md); margin-bottom: var(--spacing-md);">
+          <label class="toggle"><input type="checkbox" id="syslog-enabled" ${s.enabled ? 'checked' : ''}><span class="toggle-track"></span></label>
+          <span>Enable syslog forwarding</span>
         </div>
-        <button class="btn btn-primary">Save</button>
+        <div class="form-group"><label class="form-label">Syslog Server</label><input type="text" class="form-input" id="syslog-server" placeholder="192.168.1.10" value="${escapeHtml(s.server)}"></div>
+        <div class="form-group"><label class="form-label">Port</label><input type="number" class="form-input" id="syslog-port" value="${s.port}" min="1" max="65535" style="width: 120px;"></div>
+        <div class="form-group"><label class="form-label">Protocol</label>
+          <select class="form-select" id="syslog-protocol" style="width: 120px;">
+            <option value="udp" ${s.protocol === 'udp' ? 'selected' : ''}>UDP</option>
+            <option value="tcp" ${s.protocol === 'tcp' ? 'selected' : ''}>TCP</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" id="syslog-save-btn">Save</button>
       </div>
     `;
+  }
+
+  private async loadSyslog(): Promise<void> {
+    try {
+      const syslog = await syslogApi.get();
+      this.setState({ syslog });
+    } catch {
+      // Non-fatal — render uses defaults.
+      this.setState({ syslog: { enabled: false, server: '', port: 514, protocol: 'udp' } });
+    }
+  }
+
+  private bindSyslogTab(): void {
+    this.$<HTMLButtonElement>('#syslog-save-btn')?.addEventListener('click', () => this.saveSyslog());
+  }
+
+  private async saveSyslog(): Promise<void> {
+    const enabled = this.$<HTMLInputElement>('#syslog-enabled')?.checked ?? false;
+    const server = this.$<HTMLInputElement>('#syslog-server')?.value.trim() ?? '';
+    const portStr = this.$<HTMLInputElement>('#syslog-port')?.value ?? '514';
+    const protocol = this.$<HTMLSelectElement>('#syslog-protocol')?.value || 'udp';
+    const port = parseInt(portStr);
+    if (enabled && !server) { showToast('Server address required when enabled', 'error'); return; }
+    if (isNaN(port) || port < 1 || port > 65535) { showToast('Port must be 1-65535', 'error'); return; }
+    try {
+      await syslogApi.save({ enabled, server, port, protocol });
+      showToast('Syslog settings saved', 'success');
+      this.loadSyslog();
+    } catch { showToast('Failed to save syslog settings', 'error'); }
   }
 
   private renderSystem(): string {
