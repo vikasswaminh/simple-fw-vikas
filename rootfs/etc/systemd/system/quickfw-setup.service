@@ -1,14 +1,27 @@
 [Unit]
-Description=QuickFW First Boot Setup
+Description=QuickFW First Boot Setup (auto-launch on serial console)
 After=multi-user.target
 ConditionPathExists=!/etc/quickfw/appliance.yaml
+# Take exclusive ownership of /dev/ttyS0 — Proxmox xterm.js operators
+# expect the wizard to auto-launch when they open the console. Conflicts
+# with serial-getty so the two don't fight; OnSuccess relaunches getty
+# after the wizard finishes.
+Conflicts=serial-getty@ttyS0.service
+Before=serial-getty@ttyS0.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/quickfw-setup
-StandardInput=tty
-TTYPath=/dev/tty1
 RemainAfterExit=no
+ExecStart=/usr/local/bin/quickfw-setup
+# Optional re-launch of the standard getty after the wizard exits, so the
+# operator sees a normal login prompt without rebooting.
+ExecStartPost=/bin/systemctl start --no-block serial-getty@ttyS0.service
+StandardInput=tty
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/ttyS0
+TTYReset=yes
+TTYVHangup=yes
 
 [Install]
 WantedBy=multi-user.target

@@ -1,0 +1,93 @@
+#!/bin/bash
+# Interactive disk-selection TUI for the boot menu's "Install to disk" entry.
+#
+# Triggered from quickfw-boot-install.service when the kernel was booted
+# with `quickfw.install=1`. Walks the operator through:
+#   1. Pick a target disk (lists candidates with sizes/models)
+#   2. Confirm (DESTRUCTIVE)
+#   3. Run quickfw-install /dev/sdX --yes
+#   4. Reboot
+#
+# If the operator declines, falls through to a normal shell so they can
+# poke around in the live system.
+
+set -uo pipefail
+
+if [[ $EUID -ne 0 ]]; then
+  echo "quickfw-install-tui must run as root." >&2
+  exit 1
+fi
+
+clear
+cat <<EOF
+╔══════════════════════════════════════════════════════════════════╗
+║  QuickFW — Install to disk                                       ║
+╠══════════════════════════════════════════════════════════════════╣
+║  This will partition a disk and install QuickFW with the         ║
+║  A/B + persistent-config layout for OTA upgrades.                ║
+║                                                                  ║
+║  THIS DESTROYS ALL DATA on the chosen disk.                      ║
+╚══════════════════════════════════════════════════════════════════╝
+
+Detected disks (excluding the boot media):
+EOF
+
+# List candidate disks. Skip the live ISO (sr0/loop) and removable media if
+# they're the boot source. lsblk's TYPE=disk filter excludes partitions.
+mapfile -t CANDIDATES < <(lsblk -dn -o NAME,SIZE,MODEL,TYPE | awk '$NF=="disk" {print $1, $2, $3}')
+if [ ${#CANDIDATES[@]} -eq 0 ]; then
+    echo
+    echo "No installable disks found. Dropping to a shell."
+    exec bash -i
+fi
+
+i=1
+for entry in "${CANDIDATES[@]}"; do
+    echo "  [$i] /dev/$entry"
+    i=$((i+1))
+done
+echo
+
+while true; do
+    read -p "Pick disk number (or 'q' to skip install and drop to shell): " choice
+    case "$choice" in
+        q|Q|"")
+            echo "Skipping install. Drop to shell."
+            exec bash -i
+            ;;
+        ''|*[!0-9]*)
+            echo "  Enter a number or 'q'."
+            continue
+            ;;
+        *)
+            if [ "$choice" -ge 1 ] && [ "$choice" -le ${#CANDIDATES[@]} ]; then
+                disk_name=$(echo "${CANDIDATES[$((choice-1))]}" | awk '{print $1}')
+                target="/dev/$disk_name"
+                break
+            fi
+            echo "  Out of range."
+            ;;
+    esac
+done
+
+echo
+echo "Selected: $target"
+echo "Running quickfw-install (this takes a couple of minutes)..."
+echo
+
+if /usr/local/sbin/quickfw-install "$target" --yes; then
+    cat <<EOF
+
+╔══════════════════════════════════════════════════════════════════╗
+║  Install complete.                                               ║
+║  Remove the installation media and the system will reboot in 10  ║
+║  seconds into the freshly installed appliance.                   ║
+╚══════════════════════════════════════════════════════════════════╝
+EOF
+    sleep 10
+    systemctl reboot
+else
+    echo
+    echo "Install failed. Check the messages above. Dropping to a shell."
+    exec bash -i
+fi

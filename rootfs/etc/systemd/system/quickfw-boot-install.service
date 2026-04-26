@@ -1,0 +1,25 @@
+[Unit]
+# Boot menu's "Install to disk" entry sets quickfw.install=1 on the kernel
+# cmdline. This unit detects that flag and runs the install TUI on the
+# active console (ttyS0 by default for headless / Proxmox use).
+#
+# We don't run unconditionally — the same ISO is used for live-only boots.
+Description=QuickFW boot-time install TUI
+ConditionKernelCommandLine=quickfw.install
+After=multi-user.target
+# Replace the serial-getty so the install TUI has the console to itself.
+Conflicts=serial-getty@ttyS0.service
+DefaultDependencies=no
+
+[Service]
+Type=idle
+ExecStart=/usr/local/sbin/quickfw-install-tui
+StandardInput=tty
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/ttyS0
+TTYReset=yes
+TTYVHangup=yes
+
+[Install]
+WantedBy=multi-user.target

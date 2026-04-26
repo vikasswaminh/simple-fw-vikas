@@ -92,6 +92,12 @@ COPY --from=rust-builder /build/front/dist/ config/includes.chroot/opt/quickfw/f
 # Copy rootfs overlay (sysctl, modprobe, systemd, nftables, etc.)
 COPY rootfs/etc/ config/includes.chroot/etc/
 
+# Copy first-boot + install + persist helper scripts that live in /usr/local/sbin
+# (quickfw-install, quickfw-install-tui, quickfw-firstboot-serial,
+# quickfw-persist-mount). All need 0755.
+COPY rootfs/usr/local/sbin/ config/includes.chroot/usr/local/sbin/
+RUN chmod 755 config/includes.chroot/usr/local/sbin/*
+
 # Copy recovery console and tuning scripts
 COPY scripts/quickfw-console config/includes.chroot/usr/local/bin/quickfw-console
 COPY scripts/quickfw-irq-tune config/includes.chroot/usr/local/bin/quickfw-irq-tune
@@ -113,6 +119,14 @@ systemctl enable quickfw-api.service 2>/dev/null || true
 systemctl enable quickfw-cli.service 2>/dev/null || true
 systemctl enable quickfw-console.service 2>/dev/null || true
 systemctl enable nftables.service 2>/dev/null || true
+# v1.0.2 additions: persist-mount (no-op on live), boot-install TUI
+# (gated by ConditionKernelCommandLine=quickfw.install — only fires for
+# the boot menu's Install entry), upgrade watchdog (gated by
+# ConditionPathExists=/persist/.../.upgrade-pending — no-op until an
+# upgrade has been applied).
+systemctl enable quickfw-persist.service 2>/dev/null || true
+systemctl enable quickfw-boot-install.service 2>/dev/null || true
+systemctl enable quickfw-upgrade-verify.service 2>/dev/null || true
 
 # Disable SSH by default
 systemctl disable ssh.service 2>/dev/null || true
@@ -152,11 +166,17 @@ MENUCFG
 
 RUN cat > config/bootloaders/isolinux/live.cfg << 'LIVECFG'
 label quickfw
-	menu label ^QuickFW Firewall (Live)
+	menu label ^Live (try without installing)
 	menu default
 	linux /live/vmlinuz
 	initrd /live/initrd.img
 	append boot=live components hostname=quickfw toram quiet loglevel=3 systemd.show_status=false rd.systemd.show_status=false vt.global_cursor_default=0
+
+label quickfw-install
+	menu label ^Install to disk (creates A/B + persist partitions)
+	linux /live/vmlinuz
+	initrd /live/initrd.img
+	append boot=live components hostname=quickfw toram quickfw.install=1 quiet loglevel=3 systemd.show_status=false rd.systemd.show_status=false
 
 label quickfw-safe
 	menu label QuickFW (Safe Mode)

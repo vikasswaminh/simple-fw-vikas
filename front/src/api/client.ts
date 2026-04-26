@@ -83,6 +83,31 @@ class ApiClient {
         errorData = await response.text();
       }
 
+      // 401 / 403-with-no-session / 503 "Appliance not initialized" all mean
+      // the SPA can't render anything useful. Redirect to /login so the
+      // operator gets prompted instead of seeing a confusingly-empty page
+      // (e.g. visiting https://<ip>/firewall before logging in). Skip the
+      // redirect when we ARE on /login already (avoids infinite reload).
+      if (typeof window !== 'undefined') {
+        const path = window.location.pathname;
+        const onLogin = path === '/login' || path === '/login.html';
+        const reason = (errorData as { error?: string })?.error;
+        const needsAuth =
+          response.status === 401 ||
+          (response.status === 503 && reason === 'Appliance not initialized') ||
+          (response.status === 403 && reason === 'password_change_required');
+        if (needsAuth && !onLogin) {
+          // Preserve where the user wanted to go so the login page can
+          // bounce back after auth.
+          try {
+            sessionStorage.setItem('quickfw_post_login_redirect', path + window.location.search);
+          } catch { /* sessionStorage may be disabled */ }
+          window.location.href = '/login';
+          // Fall through to throw so the in-flight caller doesn't keep
+          // running on stale state during the navigation.
+        }
+      }
+
       throw new ApiErrorClass(
         response.status,
         typeof errorData === 'string' ? errorData : response.statusText,
