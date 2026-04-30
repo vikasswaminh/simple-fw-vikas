@@ -8,6 +8,7 @@ name = "quickfw-setup"
 path = "src/main.rs"
 
 [dependencies]
-gfw-ifmgr = { package = "ifmgr", path = "../ifmgr" }
-serde = { version = "1.0", features = ["derive"] }
-serde_yaml = "0.9"
+# pfSense-style minimal wizard — no ifmgr / serde dependencies. We write
+# YAML directly with format!() and run `ip` commands for addressing. The
+# heavy lifting (multi-interface zoning, DHCP server, FW rules) all moves
+# to the web UI where the operator has visual feedback.

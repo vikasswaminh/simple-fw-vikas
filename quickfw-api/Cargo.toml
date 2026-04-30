@@ -11,6 +11,10 @@ path = "src/main.rs"
 tokio = { version = "1.41.1", features = ["full"] }
 axum = { version = "0.7.7", features = ["ws"] }
 axum-server = { version = "0.7", features = ["tls-rustls"] }
+# rustls 0.23 made the crypto provider non-default; install `ring` so the
+# binary doesn't panic on first TLS handshake. Otherwise the API exits 101
+# right after printing "QuickFW API listening on https://...".
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 tower = "0.5.1"
 lazy_static = "1.5.0"
 tracing = "0.1"

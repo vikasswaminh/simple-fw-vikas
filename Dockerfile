@@ -128,8 +128,10 @@ systemctl enable quickfw-persist.service 2>/dev/null || true
 systemctl enable quickfw-boot-install.service 2>/dev/null || true
 systemctl enable quickfw-upgrade-verify.service 2>/dev/null || true
 
-# Disable SSH by default
-systemctl disable ssh.service 2>/dev/null || true
+# Live ISO ships with SSH enabled (root/quickfw) for first-boot
+# diagnostics. Once the wizard runs, the operator can disable it from
+# the web UI's Settings → SSH page.
+systemctl enable ssh.service 2>/dev/null || true
 
 # Disable unnecessary timers
 systemctl disable apt-daily.timer 2>/dev/null || true

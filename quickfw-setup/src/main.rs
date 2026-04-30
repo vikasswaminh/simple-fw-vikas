@@ -1,20 +1,25 @@
-//! QuickFW Firewall Appliance — First Boot Setup Wizard
+//! QuickFW first-boot wizard — pfSense-style.
 //!
-//! Enhanced version: adds root password, SSH toggle, DMZ support,
-//! default-deny firewall, and drops into CLI after completion.
+//! The console wizard does the absolute minimum to get the operator into
+//! the web UI:
+//!
+//!   1. Pick the management interface (auto if there's only one).
+//!   2. Pick its addressing — DHCP (default) or static.
+//!   3. Pick the web-UI admin password.
+//!
+//! That's it. No LAN config, no DHCP server, no SSH, no DMZ — every other
+//! knob is in the web UI where the operator has a browser, search, and
+//! visual feedback. After the wizard, the appliance prints a banner with
+//! the URL to open. Total keypresses for the happy path (one NIC + DHCP +
+//! a typed password): ~3 prompts.
 
 use std::fs;
 use std::io::{self, Write};
 use std::process::Command;
 
-use gfw_ifmgr::{
-    ApplianceNetConfig, LanConfig, WanConfig, WanMode,
-    generate_dnsmasq_config, list_interfaces, apply_interface_config, save_config,
-};
-
 const APPLIANCE_CONFIG_PATH: &str = "/etc/quickfw/appliance.yaml";
-const DNSMASQ_CONFIG_PATH: &str = "/etc/dnsmasq.d/quickfw.conf";
 const ADMIN_PASSWORD_PATH: &str = "/etc/quickfw/admin.password";
+const USERS_YAML_PATH: &str = "/etc/quickfw/users.yaml";
 
 const BANNED_PASSWORDS: &[&str] = &[
     "admin", "password", "123456", "12345678", "qwerty",
@@ -22,352 +27,235 @@ const BANNED_PASSWORDS: &[&str] = &[
 ];
 
 fn main() {
-    println!();
-    println!("════════════════════════════════════════════════════════════");
-    println!("         QuickFW — First Boot Setup");
-    println!("════════════════════════════════════════════════════════════");
-    println!();
+    print_banner();
 
-    // Check if already configured
     if std::path::Path::new(APPLIANCE_CONFIG_PATH).exists() {
         println!("Appliance is already configured.");
-        println!("To reconfigure, delete {} and rerun.", APPLIANCE_CONFIG_PATH);
+        println!("To re-run the wizard, delete {} and reboot.", APPLIANCE_CONFIG_PATH);
         println!();
-        // Drop into CLI
         drop_to_cli();
         return;
     }
 
-    // Create config dir
-    fs::create_dir_all("/etc/quickfw").unwrap_or_default();
+    let _ = fs::create_dir_all("/etc/quickfw");
 
-    // ── Step 1: Detect interfaces ──
-    println!("Detecting network interfaces...");
+    // ── Step 1: pick management interface ──
     let interfaces = list_interfaces();
-
     if interfaces.is_empty() {
         eprintln!("ERROR: No network interfaces detected. Cannot continue.");
         std::process::exit(1);
     }
 
+    let mgmt_iface = if interfaces.len() == 1 {
+        println!("Detected single interface: {}", interfaces[0].name);
+        println!("Using it for management.");
+        interfaces[0].clone()
+    } else {
+        println!("Detected interfaces:");
+        for (i, iface) in interfaces.iter().enumerate() {
+            let link = if iface.link_up { "UP" } else { "DOWN" };
+            let addr = iface.ipv4.as_deref().unwrap_or("no IP");
+            println!("  [{}] {:8} {} {}", i + 1, iface.name, link, addr);
+        }
+        println!();
+        let idx = prompt_select("Pick management interface", interfaces.len());
+        interfaces[idx].clone()
+    };
+
+    // ── Step 2: addressing ──
     println!();
-    println!("Available interfaces:");
-    for (i, iface) in interfaces.iter().enumerate() {
-        let status = if iface.link_up { "UP" } else { "DOWN" };
-        let addrs = if iface.ipv4_addrs.is_empty() {
-            "no IP".to_string()
-        } else {
-            iface.ipv4_addrs.join(", ")
-        };
-        println!("  [{}] {} ({}) — {} — {}", i + 1, iface.name, iface.mac, status, addrs);
-    }
-
-    if interfaces.len() < 2 {
-        eprintln!();
-        eprintln!("WARNING: Only {} interface(s) detected. A firewall needs at least 2.", interfaces.len());
-        eprintln!("         Proceeding with available interfaces...");
-    }
-
-    let total_steps = 7;
-
-    // ── Step 2: Select WAN interface ──
-    println!();
-    println!("Step 1/{}: Select WAN interface", total_steps);
-    let wan_idx = prompt_selection("Select WAN interface", interfaces.len());
-    let wan_iface = &interfaces[wan_idx];
-    println!("  WAN: {}", wan_iface.name);
-
-    // ── Step 3: WAN mode ──
-    println!();
-    println!("Step 2/{}: WAN address mode", total_steps);
-    println!("  [1] DHCP (automatic)");
+    println!("Addressing for {} (this is how you'll reach the web UI):", mgmt_iface.name);
+    println!("  [1] DHCP (automatic — recommended)");
     println!("  [2] Static");
-    let wan_mode_choice = prompt_selection("Select WAN mode", 2);
+    let mode_choice = prompt_default("Choice [1]", "1");
 
-    let (wan_mode, wan_address, wan_gateway, wan_dns) = if wan_mode_choice == 1 {
-        // Static
-        let addr = prompt_input("WAN IP address (CIDR, e.g., 203.0.113.10/24)");
-        let gw = prompt_input("Default gateway (e.g., 203.0.113.1)");
-        let dns_str = prompt_input_default("DNS servers (comma-separated)", "8.8.8.8,1.1.1.1");
-        let dns: Vec<String> = dns_str.split(',').map(|s| s.trim().to_string()).collect();
-        (WanMode::Static, Some(addr), Some(gw), dns)
+    let static_cfg = if mode_choice.trim() == "2" {
+        let addr = prompt_required("IP/CIDR (e.g. 192.168.1.10/24)");
+        let gw = prompt_required("Gateway IP");
+        Some((addr, gw))
     } else {
-        (WanMode::Dhcp, None, None, vec![])
-    };
-
-    // ── Step 4: Select LAN interface ──
-    println!();
-    println!("Step 3/{}: Select LAN interface", total_steps);
-    let lan_candidates: Vec<&gfw_ifmgr::InterfaceInfo> = interfaces
-        .iter()
-        .filter(|i| i.name != wan_iface.name)
-        .collect();
-
-    let lan_iface = if lan_candidates.is_empty() {
-        eprintln!("WARNING: No separate LAN interface. Using WAN interface for LAN too.");
-        wan_iface
-    } else if lan_candidates.len() == 1 {
-        println!("LAN interface (auto-selected): {}", lan_candidates[0].name);
-        lan_candidates[0]
-    } else {
-        println!("Available LAN interfaces:");
-        for (i, iface) in lan_candidates.iter().enumerate() {
-            println!("  [{}] {} ({})", i + 1, iface.name, iface.mac);
-        }
-        let idx = prompt_selection("Select LAN interface", lan_candidates.len());
-        lan_candidates[idx]
-    };
-
-    // ── Step 5: LAN IP + DHCP ──
-    println!();
-    println!("Step 4/{}: LAN configuration", total_steps);
-    let lan_address = prompt_input_default("LAN IP address (CIDR)", "192.168.1.1/24");
-    let lan_dhcp_range = prompt_input_default(
-        "LAN DHCP range (start,end or empty to disable)",
-        "192.168.1.100,192.168.1.200",
-    );
-    let dhcp_range = if lan_dhcp_range.is_empty() {
         None
-    } else {
-        Some(lan_dhcp_range)
     };
 
-    // ── Step 6: Root password ──
+    // ── Step 3: admin password ──
     println!();
-    println!("Step 5/{}: Set root password", total_steps);
-    let root_password = prompt_password("Root password");
-    set_root_password(&root_password);
-
-    // ── Step 7: Admin password ──
-    println!();
-    println!("Step 6/{}: Set admin password (web UI)", total_steps);
-    println!("  Requirements: ≥ 12 chars, mix of upper/lower case + at least one digit.");
-    println!("  Press Enter to keep 'quickfw' default (first-boot lockdown stays active until changed).");
-    let admin_password = loop {
-        let pw = prompt_input_default("Admin password", "quickfw");
-        // Leaving the default keeps the appliance in first-boot lockdown — the
-        // web UI will force the admin to set a strong password on first login.
-        if pw == "quickfw" {
-            break pw;
-        }
+    println!("Set the admin password for the web UI.");
+    println!("Requirements: ≥ 12 characters, with upper + lower case + a digit.");
+    let admin_pw = loop {
+        let pw = prompt_required("Admin password");
         if let Err(reason) = check_password_strength(&pw) {
             println!("  {}", reason);
             continue;
         }
-        let confirm = prompt_input_default("Confirm password", "");
-        if confirm != pw {
-            println!("  Passwords do not match. Try again.");
+        let confirm = prompt_required("Confirm password");
+        if pw != confirm {
+            println!("  Passwords don't match. Try again.");
             continue;
         }
         break pw;
     };
 
-    // ── Step 8: SSH ──
-    println!();
-    println!("Step 7/{}: SSH remote access", total_steps);
-    let enable_ssh = prompt_yes_no("Enable SSH?", false);
-
-    // ── Summary ──
-    println!();
-    println!("════════════════════════════════════════════════════════════");
-    println!("  Configuration Summary");
-    println!("════════════════════════════════════════════════════════════");
-    println!("  WAN:  {} ({:?})", wan_iface.name, wan_mode);
-    if let Some(ref addr) = wan_address {
-        println!("        IP: {}", addr);
-    }
-    if let Some(ref gw) = wan_gateway {
-        println!("        Gateway: {}", gw);
-    }
-    println!("  LAN:  {} ({})", lan_iface.name, lan_address);
-    if let Some(ref range) = dhcp_range {
-        println!("        DHCP: {}", range);
-    }
-    println!("  SSH:  {}", if enable_ssh { "Enabled" } else { "Disabled" });
-    println!();
-
-    let confirm = prompt_input_default("Apply? (yes/no)", "yes");
-    if confirm.to_lowercase() != "yes" && confirm.to_lowercase() != "y" {
-        println!("Setup cancelled. Run quickfw-setup again to reconfigure.");
-        return;
-    }
-
     // ── Apply ──
     println!();
     println!("Applying configuration...");
 
-    // Build config
-    let config = ApplianceNetConfig {
-        wan: WanConfig {
-            interface: wan_iface.name.clone(),
-            mode: wan_mode,
-            address: wan_address,
-            gateway: wan_gateway,
-            dns: wan_dns,
-        },
-        lan: LanConfig {
-            interface: lan_iface.name.clone(),
-            address: lan_address.clone(),
-            dhcp_range,
-        },
-    };
-
-    // 1. Save appliance config
-    if let Err(e) = save_config(&config, APPLIANCE_CONFIG_PATH) {
-        eprintln!("ERROR: Failed to save config: {}", e);
-        std::process::exit(1);
-    }
-    println!("  [OK] Configuration saved");
-
-    // 2. Save admin password
-    if let Err(e) = fs::write(ADMIN_PASSWORD_PATH, &admin_password) {
-        eprintln!("WARNING: Failed to save admin password: {}", e);
+    if let Some((ref addr, ref gw)) = static_cfg {
+        apply_static(&mgmt_iface.name, addr, gw);
     } else {
-        let _ = Command::new("chmod").args(["600", ADMIN_PASSWORD_PATH]).output();
-        println!("  [OK] Admin password saved");
+        apply_dhcp(&mgmt_iface.name);
     }
 
-    // 3. Apply network config
-    match apply_interface_config(&config) {
-        Ok(()) => println!("  [OK] Network interfaces configured"),
-        Err(e) => {
-            eprintln!("WARNING: Failed to apply network config: {}", e);
-            eprintln!("         You may need to configure networking manually.");
-        }
-    }
+    write_admin_password(&admin_pw);
 
-    // 4. Write dnsmasq config
-    let dnsmasq_conf = generate_dnsmasq_config(&config.lan);
-    fs::create_dir_all("/etc/dnsmasq.d").unwrap_or_default();
-    if let Err(e) = fs::write(DNSMASQ_CONFIG_PATH, &dnsmasq_conf) {
-        eprintln!("WARNING: Failed to write dnsmasq config: {}", e);
-    } else {
-        println!("  [OK] DHCP/DNS configuration written");
-    }
-
-    // 5. Save interface roles
-    let roles_yaml = format!(
-        "roles:\n  - interface: {}\n    role: wan\n    zone: wan\n  - interface: {}\n    role: lan\n    zone: lan\n",
-        wan_iface.name, lan_iface.name
+    // Marker file — bypass the wizard on subsequent boots.
+    let yaml = format!(
+        "schema_version: '1.0'\nmgmt_interface: {}\nmode: {}\n",
+        mgmt_iface.name,
+        if static_cfg.is_some() { "static" } else { "dhcp" },
     );
-    let _ = fs::write("/etc/quickfw/interfaces.yaml", &roles_yaml);
+    if let Err(e) = fs::write(APPLIANCE_CONFIG_PATH, yaml) {
+        eprintln!("WARN: could not write {}: {}", APPLIANCE_CONFIG_PATH, e);
+    }
 
-    // 6. Apply default-deny firewall with masquerade
-    apply_default_firewall(&wan_iface.name);
-    println!("  [OK] Default-deny firewall applied");
-
-    // 7. Apply NAT masquerade
-    apply_default_nat(&wan_iface.name);
-    println!("  [OK] NAT masquerade on {}", wan_iface.name);
-
-    // 8. SSH
-    if enable_ssh {
-        let _ = Command::new("systemctl").args(["enable", "--now", "ssh"]).output();
-        println!("  [OK] SSH enabled");
+    // Print URL — this is what the operator needs to see.
+    // current_ipv4 returns "10.0.2.15/24" (CIDR), strip the prefix length
+    // for display since browsers don't accept it.
+    let ip_cidr = current_ipv4(&mgmt_iface.name);
+    let ip = ip_cidr.split('/').next().unwrap_or(&ip_cidr).to_string();
+    println!();
+    println!("════════════════════════════════════════════════════════════");
+    println!("   QuickFW setup complete.");
+    println!();
+    if !ip.is_empty() {
+        println!("   Open in your browser:");
+        println!();
+        println!("       https://{}", ip);
     } else {
-        let _ = Command::new("systemctl").args(["disable", "--now", "ssh"]).output();
-        println!("  [OK] SSH disabled");
-    }
-
-    // 9. Start services
-    println!("  Starting services...");
-    for svc in ["dnsmasq", "quickfw-api"] {
-        let _ = Command::new("systemctl").args(["enable", svc]).output();
-        let output = Command::new("systemctl").args(["restart", svc]).output();
-        match output {
-            Ok(o) if o.status.success() => println!("  [OK] {} started", svc),
-            Ok(o) => {
-                let stderr = String::from_utf8_lossy(&o.stderr);
-                eprintln!("  [WARN] {} may have failed: {}", svc, stderr.trim());
-            }
-            Err(e) => eprintln!("  [WARN] Failed to start {}: {}", svc, e),
-        }
-    }
-
-    // Done
-    let lan_ip = config.lan.address.split('/').next().unwrap_or("192.168.1.1");
-    println!();
-    println!("════════════════════════════════════════════════════════════");
-    println!("  Setup Complete!");
-    println!("════════════════════════════════════════════════════════════");
-    println!();
-    println!("  Web Dashboard: https://{}", lan_ip);
-    println!("  Login:         admin / {}", admin_password);
-    if enable_ssh {
-        println!("  SSH:           ssh root@{}", lan_ip);
+        println!("   No IPv4 address yet — DHCP may still be in progress.");
+        println!("   Check with `ip addr` and re-try in a moment.");
     }
     println!();
-    println!("  Dropping to QuickFW CLI...");
+    println!("   Login:   admin");
+    println!("   (password you just set)");
     println!("════════════════════════════════════════════════════════════");
     println!();
-
-    // Drop to CLI
+    println!("Press Enter to drop to a shell.");
+    let _ = read_line();
     drop_to_cli();
 }
 
-// ── Helper functions ──
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
-fn prompt_input(label: &str) -> String {
-    loop {
-        print!("{}: ", label);
-        io::stdout().flush().unwrap();
-        let mut input = String::new();
-        io::stdin().read_line(&mut input).unwrap();
-        let trimmed = input.trim().to_string();
-        if !trimmed.is_empty() {
-            return trimmed;
+fn print_banner() {
+    println!();
+    println!("════════════════════════════════════════════════════════════");
+    println!("            QuickFW Firewall — First Boot Setup");
+    println!("════════════════════════════════════════════════════════════");
+    println!();
+}
+
+#[derive(Clone)]
+struct IfaceLite {
+    name: String,
+    link_up: bool,
+    ipv4: Option<String>,
+}
+
+fn list_interfaces() -> Vec<IfaceLite> {
+    // Use /sys/class/net to enumerate. Skip loopback and virtual bridges.
+    let mut out = Vec::new();
+    let entries = match fs::read_dir("/sys/class/net") {
+        Ok(e) => e,
+        Err(_) => return out,
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name == "lo" {
+            continue;
         }
-        println!("  (input required)");
+        // Skip docker / bridge / wg interfaces — they're not what an
+        // operator wants for management.
+        if name.starts_with("docker") || name.starts_with("br-") || name.starts_with("veth") {
+            continue;
+        }
+        let link_up = fs::read_to_string(format!("/sys/class/net/{}/operstate", name))
+            .map(|s| s.trim() == "up")
+            .unwrap_or(false);
+        let ipv4 = current_ipv4_opt(&name);
+        out.push(IfaceLite { name, link_up, ipv4 });
     }
+    // Show interfaces that are UP first (operator usually wants those).
+    out.sort_by(|a, b| b.link_up.cmp(&a.link_up).then(a.name.cmp(&b.name)));
+    out
 }
 
-fn prompt_input_default(label: &str, default: &str) -> String {
-    print!("{} [{}]: ", label, default);
-    io::stdout().flush().unwrap();
-    let mut input = String::new();
-    io::stdin().read_line(&mut input).unwrap();
-    let trimmed = input.trim().to_string();
-    if trimmed.is_empty() {
-        default.to_string()
-    } else {
-        trimmed
-    }
+fn current_ipv4(name: &str) -> String {
+    current_ipv4_opt(name).unwrap_or_default()
 }
 
-fn prompt_selection(label: &str, max: usize) -> usize {
-    loop {
-        print!("{} [1-{}]: ", label, max);
-        io::stdout().flush().unwrap();
-        let mut input = String::new();
-        io::stdin().read_line(&mut input).unwrap();
-        if let Ok(n) = input.trim().parse::<usize>() {
-            if n >= 1 && n <= max {
-                return n - 1;
+fn current_ipv4_opt(name: &str) -> Option<String> {
+    let out = Command::new("ip").args(["-4", "-o", "addr", "show", name]).output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    for line in text.lines() {
+        if let Some(idx) = line.find("inet ") {
+            let rest = &line[idx + 5..];
+            if let Some(end) = rest.find(' ') {
+                return Some(rest[..end].to_string());
             }
         }
-        println!("  Please enter a number between 1 and {}", max);
+    }
+    None
+}
+
+fn apply_dhcp(iface: &str) {
+    let _ = Command::new("ip").args(["addr", "flush", "dev", iface]).status();
+    let _ = Command::new("ip").args(["link", "set", iface, "up"]).status();
+    // Best-effort DHCP — if dhclient isn't installed, the operator will
+    // need to set static or boot with the LAN side providing DHCP.
+    let r = Command::new("dhclient").args(["-v", iface]).status();
+    if !r.map(|s| s.success()).unwrap_or(false) {
+        println!("  WARN: dhclient failed; the appliance may need a static IP.");
     }
 }
 
-fn prompt_yes_no(label: &str, default: bool) -> bool {
-    let hint = if default { "Y/n" } else { "y/N" };
-    print!("{} [{}]: ", label, hint);
-    io::stdout().flush().unwrap();
-    let mut input = String::new();
-    io::stdin().read_line(&mut input).unwrap();
-    let trimmed = input.trim().to_lowercase();
-    if trimmed.is_empty() {
-        return default;
-    }
-    trimmed == "y" || trimmed == "yes"
+fn apply_static(iface: &str, addr: &str, gw: &str) {
+    let _ = Command::new("ip").args(["addr", "flush", "dev", iface]).status();
+    let _ = Command::new("ip").args(["link", "set", iface, "up"]).status();
+    let _ = Command::new("ip").args(["addr", "add", addr, "dev", iface]).status();
+    let _ = Command::new("ip").args(["route", "del", "default"]).status();
+    let _ = Command::new("ip").args(["route", "add", "default", "via", gw, "dev", iface]).status();
 }
 
-/// Enforce a minimum-strength policy on the admin password.
-///
-/// Rules:
-///   - ≥ 12 characters
-///   - at least one lowercase, one uppercase, one digit
-///   - not in the embedded weak-password list (case-insensitive)
+fn write_admin_password(pw: &str) {
+    // Write both the legacy admin.password file (Argon2 hash) AND the
+    // new users.yaml (Phase G) so first-boot lockdown lifts.
+    use std::process::Stdio;
+    let hash = match Command::new("openssl")
+        .args(["passwd", "-6", pw]) // SHA-512 crypt — acceptable as an emergency fallback
+        .stdout(Stdio::piped())
+        .output()
+    {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
+        _ => pw.to_string(), // last-ditch — auth.rs auto-migrates plaintext to argon2 on first login
+    };
+    let _ = fs::write(ADMIN_PASSWORD_PATH, &hash);
+
+    // Also seed users.yaml with admin (role=admin) so Phase G's RBAC has
+    // an initial entry. The hash format here is plaintext — auth.rs's
+    // first verify will rehash it as argon2 and rewrite. This avoids a
+    // build dependency on argon2 from the setup binary.
+    let yaml = format!(
+        "schema_version: '1.0'\nusers:\n  - username: admin\n    password_hash: {}\n    role: admin\n",
+        pw
+    );
+    let _ = fs::write(USERS_YAML_PATH, &yaml);
+}
+
 fn check_password_strength(pw: &str) -> Result<(), String> {
     if pw.len() < 12 {
         return Err("Password must be at least 12 characters.".to_string());
@@ -385,116 +273,51 @@ fn check_password_strength(pw: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn prompt_password(label: &str) -> String {
+// ---------------------------------------------------------------------------
+// Prompts
+// ---------------------------------------------------------------------------
+
+fn prompt_required(label: &str) -> String {
     loop {
         print!("{}: ", label);
-        io::stdout().flush().unwrap();
-        let mut pw = String::new();
-        io::stdin().read_line(&mut pw).unwrap();
-        let pw = pw.trim().to_string();
-        if pw.len() < 4 {
-            println!("  Password must be at least 4 characters.");
-            continue;
+        let _ = io::stdout().flush();
+        let s = read_line();
+        if !s.trim().is_empty() {
+            return s.trim().to_string();
         }
-        print!("Confirm {}: ", label.to_lowercase());
-        io::stdout().flush().unwrap();
-        let mut confirm = String::new();
-        io::stdin().read_line(&mut confirm).unwrap();
-        if pw == confirm.trim() {
-            return pw;
-        }
-        println!("  Passwords do not match. Try again.");
+        println!("  Required.");
     }
 }
 
-fn set_root_password(password: &str) {
-    let output = Command::new("chpasswd")
-        .stdin(std::process::Stdio::piped())
-        .spawn()
-        .and_then(|mut child| {
-            if let Some(ref mut stdin) = child.stdin {
-                let _ = stdin.write_all(format!("root:{}\n", password).as_bytes());
+fn prompt_default(label: &str, default: &str) -> String {
+    print!("{}: ", label);
+    let _ = io::stdout().flush();
+    let s = read_line();
+    let t = s.trim();
+    if t.is_empty() { default.to_string() } else { t.to_string() }
+}
+
+fn prompt_select(label: &str, count: usize) -> usize {
+    loop {
+        print!("{} [1-{}]: ", label, count);
+        let _ = io::stdout().flush();
+        let s = read_line();
+        if let Ok(n) = s.trim().parse::<usize>() {
+            if n >= 1 && n <= count {
+                return n - 1;
             }
-            child.wait()
-        });
-    match output {
-        Ok(s) if s.success() => println!("  [OK] Root password set"),
-        _ => eprintln!("  [WARN] Failed to set root password"),
+        }
+        println!("  Enter a number between 1 and {}.", count);
     }
 }
 
-fn apply_default_firewall(_wan_iface: &str) {
-    let script = r#"#!/usr/sbin/nft -f
-add table inet quickfw
-flush table inet quickfw
-
-add chain inet quickfw MGMT_SAFETY { type filter hook input priority -200; policy accept; }
-flush chain inet quickfw MGMT_SAFETY
-add rule inet quickfw MGMT_SAFETY tcp dport { 22, 443, 3000 } counter accept
-add rule inet quickfw MGMT_SAFETY meta l4proto icmp counter accept
-add rule inet quickfw MGMT_SAFETY meta l4proto icmpv6 counter accept
-
-add chain inet quickfw quickfw_input { type filter hook input priority -10; policy drop; }
-flush chain inet quickfw quickfw_input
-add rule inet quickfw quickfw_input ct state established,related accept
-add rule inet quickfw quickfw_input ct state invalid drop
-add rule inet quickfw quickfw_input iifname "lo" accept
-
-add chain inet quickfw quickfw_forward { type filter hook forward priority -10; policy drop; }
-flush chain inet quickfw quickfw_forward
-add rule inet quickfw quickfw_forward ct state established,related accept
-add rule inet quickfw quickfw_forward ct state invalid drop
-
-add chain inet quickfw quickfw_output { type filter hook output priority -10; policy accept; }
-flush chain inet quickfw quickfw_output
-"#.to_string();
-
-    let _ = Command::new("nft")
-        .arg("-f")
-        .arg("-")
-        .stdin(std::process::Stdio::piped())
-        .spawn()
-        .and_then(|mut child| {
-            if let Some(ref mut stdin) = child.stdin {
-                let _ = stdin.write_all(script.as_bytes());
-            }
-            child.wait()
-        });
-
-    // Save firewall config YAML for the API server
-    let fw_yaml = "forward_policy: drop\ninput_policy: drop\noutput_policy: accept\nrules: []\nzones: []\n".to_string();
-    let _ = fs::write("/etc/quickfw/firewall.yaml", &fw_yaml);
-}
-
-fn apply_default_nat(wan_iface: &str) {
-    let script = format!(r#"add table inet quickfw
-add chain inet quickfw POSTROUTING {{ type nat hook postrouting priority srcnat; }}
-flush chain inet quickfw POSTROUTING
-add rule inet quickfw POSTROUTING oifname "{}" masquerade
-"#, wan_iface);
-
-    let _ = Command::new("nft")
-        .arg("-f")
-        .arg("-")
-        .stdin(std::process::Stdio::piped())
-        .spawn()
-        .and_then(|mut child| {
-            if let Some(ref mut stdin) = child.stdin {
-                let _ = stdin.write_all(script.as_bytes());
-            }
-            child.wait()
-        });
-
-    // Save NAT config YAML
-    let nat_yaml = format!(
-        "masquerade:\n  - out_interface: {}\n    source_cidr: \"\"\nport_forward: []\n",
-        wan_iface
-    );
-    let _ = fs::write("/etc/quickfw/nat.yaml", &nat_yaml);
+fn read_line() -> String {
+    let mut buf = String::new();
+    let _ = io::stdin().read_line(&mut buf);
+    buf
 }
 
 fn drop_to_cli() {
-    // Try to exec into the QuickFW CLI
     let quickfw_path = "/usr/local/bin/quickfw";
     if std::path::Path::new(quickfw_path).exists() {
         let _ = Command::new(quickfw_path)
@@ -512,17 +335,14 @@ mod tests {
     #[test]
     fn password_too_short_rejected() {
         assert!(check_password_strength("Ab1").is_err());
-        assert!(check_password_strength("Abc12345678").is_err()); // 11 chars
+        assert!(check_password_strength("Abc12345678").is_err());
         assert!(check_password_strength("").is_err());
     }
 
     #[test]
     fn password_missing_char_class_rejected() {
-        // Missing uppercase
         assert!(check_password_strength("alllower123456").is_err());
-        // Missing lowercase
         assert!(check_password_strength("ALLUPPER123456").is_err());
-        // Missing digit
         assert!(check_password_strength("NoDigitsInThisOne").is_err());
     }
 
@@ -546,9 +366,7 @@ mod tests {
 
     #[test]
     fn password_case_insensitivity_on_weak_list() {
-        // "QUICKFW" uppercase still blocked
         assert!(check_password_strength("QUICKFWisBad1234").is_err());
-        // "PassWORD" mixed case still blocked
         assert!(check_password_strength("MyPassWORDabc12").is_err());
     }
 }

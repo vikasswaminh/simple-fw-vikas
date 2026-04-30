@@ -17,7 +17,11 @@ use std::process::Command;
 // ---------------------------------------------------------------------------
 
 const VERSION: &str = "1.0.0";
-const DEFAULT_API_URL: &str = "http://127.0.0.1:3000";
+// The API binds HTTPS on :443 (with a self-signed cert) and runs an
+// HTTP→HTTPS redirect on :3000. Old default was http://127.0.0.1:3000,
+// which 301'd to https and reqwest then refused the self-signed cert —
+// so every CLI command failed with "error sending request for url ...".
+const DEFAULT_API_URL: &str = "https://127.0.0.1";
 const HISTORY_FILE: &str = ".quickfw_history";
 
 const MGMT_SAFETY_RULESET: &str = r#"table inet quickfw {
@@ -106,8 +110,11 @@ struct CliState {
 
 impl CliState {
     fn new() -> Self {
+        // Local self-signed cert — the appliance generates one at first boot.
+        // We only ever talk to the loopback address, so accept it.
         let client = Client::builder()
             .timeout(std::time::Duration::from_secs(10))
+            .danger_accept_invalid_certs(true)
             .build()
             .unwrap_or_else(|_| Client::new());
 

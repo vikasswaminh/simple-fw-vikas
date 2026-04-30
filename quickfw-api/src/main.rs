@@ -194,6 +194,13 @@ fn ensure_tls_cert() -> Result<(String, String), String> {
 
 #[tokio::main]
 async fn main() {
+    // rustls 0.23 requires picking a crypto backend explicitly. Without
+    // this call, the first TLS handshake panics with "Could not
+    // automatically determine the process-level CryptoProvider".
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("install rustls/ring crypto provider");
+
     let cli = Cli::parse();
 
     let app = create_router().await;
