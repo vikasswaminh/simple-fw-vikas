@@ -1,0 +1,31 @@
+[Unit]
+# Recovery boot menu entry sets quickfw.recover=1 on the kernel cmdline.
+# This unit takes over /dev/ttyS0 and runs quickfw-menu directly —
+# bypassing the first-boot wizard so an operator can reset the admin
+# password or network on a deployed appliance without logging in first.
+#
+# The menu detects quickfw.recover at startup and mounts the disk's
+# QUICKFW_PERSIST partition at /persist so edits affect the installed
+# config, not just the live tmpfs.
+Description=QuickFW recovery menu (boot-time)
+ConditionKernelCommandLine=quickfw.recover
+After=multi-user.target
+Conflicts=serial-getty@ttyS0.service
+# (Don't conflict with quickfw-setup — even though our condition is exclusive
+# at runtime, systemd applies Conflicts at graph-load time, which can block
+# quickfw-setup from being evaluated at all. The conditions themselves
+# guarantee only one of {recover, setup} fires per boot.)
+DefaultDependencies=no
+
+[Service]
+Type=idle
+ExecStart=/usr/local/sbin/quickfw-menu
+StandardInput=tty
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/ttyS0
+TTYReset=yes
+TTYVHangup=yes
+
+[Install]
+WantedBy=multi-user.target

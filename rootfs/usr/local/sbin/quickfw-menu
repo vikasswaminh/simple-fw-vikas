@@ -1,0 +1,280 @@
+#!/bin/bash
+# QuickFW console menu — five items, replaces drop-to-bash on every login.
+#
+# Design principle: only items that the operator can't accomplish from the
+# web UI live here. Everything else is in the dashboard.
+#
+#   1) Reset admin password   — locked out of the web UI
+#   2) Set network address    — web UI is unreachable
+#   3) Factory reset          — wipe config, start fresh
+#   4) Shell                  — last-resort root shell
+#   5) Reboot
+#
+# The menu also runs in recovery mode (quickfw.recover=1 kernel cmdline)
+# from a live ISO with /persist auto-mounted from disk — useful when
+# users.yaml on a deployed appliance is corrupted.
+
+set -u
+
+# Where do config files live? On an installed appliance they're on
+# /persist via bind-mount; on a live ISO they're on tmpfs at /etc/quickfw.
+# When booted in recovery mode we mount /persist first.
+CONFIG_DIR="/etc/quickfw"
+PERSIST_MNT="/persist"
+
+# Detect "we're running in recovery from a live ISO over an installed disk"
+# and mount the disk's PERSIST partition at /persist if present, then
+# treat /persist/etc/quickfw as the canonical config dir.
+maybe_mount_persist() {
+    if grep -qw 'quickfw.recover' /proc/cmdline 2>/dev/null; then
+        local dev=/dev/disk/by-label/QUICKFW_PERSIST
+        if [ -e "$dev" ] && ! mountpoint -q "$PERSIST_MNT"; then
+            mkdir -p "$PERSIST_MNT"
+            if mount "$dev" "$PERSIST_MNT" 2>/dev/null; then
+                CONFIG_DIR="$PERSIST_MNT/etc/quickfw"
+                echo
+                echo "  Recovery mode: mounted $dev → $PERSIST_MNT"
+                echo "  Edits will affect the INSTALLED appliance on disk."
+                echo
+            fi
+        fi
+    fi
+}
+
+current_ip() {
+    # First non-loopback IPv4 address. Used in the status banner.
+    ip -4 -o addr show 2>/dev/null \
+        | awk '!/127\.0\.0\.1/ && /inet / {split($4,a,"/"); print a[1]; exit}'
+}
+
+mgmt_url() {
+    local ip=$(current_ip)
+    if [ -n "$ip" ]; then
+        echo "https://$ip"
+    else
+        echo "(no address)"
+    fi
+}
+
+admin_state() {
+    local users="$CONFIG_DIR/users.yaml"
+    # POSIX [[:space:]] — \s isn't reliable in BRE/ERE.
+    if [ -s "$users" ] && grep -qE 'role:[[:space:]]*admin' "$users"; then
+        echo "set"
+    else
+        echo "default (run web UI to change)"
+    fi
+}
+
+ssh_state() {
+    if systemctl is-active --quiet ssh 2>/dev/null; then
+        echo "on"
+    else
+        echo "off"
+    fi
+}
+
+draw_banner() {
+    # `clear` needs a TERM. SSH without -t doesn't set one; default to a
+    # universally-supported terminfo entry.
+    : "${TERM:=vt220}"
+    export TERM
+    clear 2>/dev/null || printf '\033[2J\033[H'
+    cat <<EOF
+
+  ┌──────────────────────────────────────────────────────────────┐
+  │                                                              │
+  │           QuickFW Firewall — Console Menu                    │
+  │                                                              │
+  └──────────────────────────────────────────────────────────────┘
+
+  Mgmt URL:   $(mgmt_url)
+  Admin pw:   $(admin_state)
+  SSH:        $(ssh_state)
+
+  1) Reset admin password    — when locked out of the web UI
+  2) Set network address     — when the web UI is unreachable
+  3) Factory reset           — wipe config (preserves admin pw)
+  4) Shell                   — drop to a root shell
+  5) Reboot
+
+EOF
+}
+
+confirm() {
+    local prompt="${1:-Continue? [y/N]}"
+    local answer
+    read -r -p "  $prompt: " answer
+    [ "$answer" = "y" ] || [ "$answer" = "Y" ]
+}
+
+pause_return() {
+    echo
+    read -r -p "  Press Enter to return to the menu..." _
+}
+
+# ─── 1) Reset admin password ──────────────────────────────────────────────
+do_reset_password() {
+    cat <<EOF
+
+  Reset admin password
+  ─────────────────────────────────────────────────────────────
+  This wipes $CONFIG_DIR/users.yaml and admin.password.
+  After reset, the appliance enters first-boot lockdown — only
+  /api/auth/login and /api/auth/password are reachable until you
+  set a new admin password via the web UI.
+
+EOF
+    confirm "Type 'y' to wipe admin credentials and restart the API" || return
+
+    rm -f "$CONFIG_DIR/users.yaml" "$CONFIG_DIR/admin.password" 2>/dev/null
+    systemctl restart quickfw-api 2>/dev/null
+
+    cat <<EOF
+
+  Done.
+
+  Open $(mgmt_url) in a browser and log in with:
+
+      Username: admin
+      Password: quickfw
+
+  The dashboard will force a password change on first login.
+
+EOF
+    pause_return
+}
+
+# ─── 2) Set network address ──────────────────────────────────────────────
+do_set_network() {
+    echo
+    echo "  Detect interfaces..."
+    echo
+    local i=0
+    local names=()
+    for n in $(ls /sys/class/net 2>/dev/null); do
+        case "$n" in
+            lo|docker*|br-*|veth*) continue ;;
+        esac
+        i=$((i+1))
+        names+=("$n")
+        local up="DOWN"
+        [ "$(cat /sys/class/net/$n/operstate 2>/dev/null)" = "up" ] && up="UP"
+        local ip=$(ip -4 -o addr show "$n" 2>/dev/null | awk '/inet /{print $4; exit}')
+        printf "    [%d] %-10s %s %s\n" "$i" "$n" "$up" "${ip:-no IP}"
+    done
+    if [ ${#names[@]} -eq 0 ]; then
+        echo "  No usable interfaces found."
+        pause_return
+        return
+    fi
+
+    echo
+    local choice
+    read -r -p "  Pick interface [1-${#names[@]}]: " choice
+    if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt ${#names[@]} ]; then
+        echo "  Invalid choice."
+        pause_return; return
+    fi
+    local iface="${names[$((choice-1))]}"
+
+    echo
+    echo "  Addressing for $iface:"
+    echo "    [1] DHCP (default)"
+    echo "    [2] Static"
+    local mode
+    read -r -p "  Choice [1]: " mode
+    mode="${mode:-1}"
+
+    if [ "$mode" = "2" ]; then
+        local addr gw
+        read -r -p "  IP/CIDR (e.g. 192.168.1.10/24): " addr
+        read -r -p "  Gateway: " gw
+        ip addr flush dev "$iface" 2>/dev/null
+        ip link set "$iface" up
+        ip addr add "$addr" dev "$iface"
+        ip route del default 2>/dev/null
+        ip route add default via "$gw" dev "$iface"
+    else
+        ip addr flush dev "$iface" 2>/dev/null
+        ip link set "$iface" up
+        dhclient -v "$iface" 2>&1 | tail -3
+    fi
+
+    sleep 1
+    echo
+    echo "  Now reachable at: $(mgmt_url)"
+    pause_return
+}
+
+# ─── 3) Factory reset ─────────────────────────────────────────────────────
+do_factory_reset() {
+    cat <<EOF
+
+  Factory reset
+  ─────────────────────────────────────────────────────────────
+  Wipes all configuration YAML files in $CONFIG_DIR
+  (firewall, NAT, routing, settings, interface roles, syslog).
+  Preserves the admin password and TLS cert so you can still
+  log in. Equivalent to the web UI's Settings → System →
+  Factory Reset, but doesn't require re-auth.
+
+EOF
+    confirm "Type 'y' to wipe all config and reboot" || return
+
+    rm -f "$CONFIG_DIR"/firewall.yaml \
+          "$CONFIG_DIR"/nat.yaml \
+          "$CONFIG_DIR"/settings.yaml \
+          "$CONFIG_DIR"/routes.yaml \
+          "$CONFIG_DIR"/interfaces.yaml \
+          "$CONFIG_DIR"/iface-descriptions.yaml \
+          "$CONFIG_DIR"/syslog.yaml \
+          "$CONFIG_DIR"/appliance.yaml \
+          2>/dev/null
+
+    echo
+    echo "  Config wiped. Rebooting in 5 seconds..."
+    sleep 5
+    systemctl reboot
+}
+
+# ─── 4) Shell ─────────────────────────────────────────────────────────────
+do_shell() {
+    cat <<EOF
+
+  Dropping to a root shell. Type 'exit' to return to the menu.
+
+EOF
+    /bin/bash -i
+}
+
+# ─── 5) Reboot ────────────────────────────────────────────────────────────
+do_reboot() {
+    echo
+    confirm "Reboot now? [y/N]" || return
+    echo
+    echo "  Rebooting..."
+    systemctl reboot
+}
+
+# ─── Main loop ────────────────────────────────────────────────────────────
+main() {
+    maybe_mount_persist
+
+    while true; do
+        draw_banner
+        local choice
+        read -r -p "  Choice [1-5]: " choice
+        case "$choice" in
+            1) do_reset_password ;;
+            2) do_set_network ;;
+            3) do_factory_reset ;;
+            4) do_shell ;;
+            5) do_reboot ;;
+            "") continue ;;
+            *) echo; echo "  Invalid choice."; sleep 1 ;;
+        esac
+    done
+}
+
+main "$@"

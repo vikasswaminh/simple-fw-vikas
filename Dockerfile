@@ -127,6 +127,7 @@ systemctl enable nftables.service 2>/dev/null || true
 systemctl enable quickfw-persist.service 2>/dev/null || true
 systemctl enable quickfw-boot-install.service 2>/dev/null || true
 systemctl enable quickfw-upgrade-verify.service 2>/dev/null || true
+systemctl enable quickfw-recover.service 2>/dev/null || true
 
 # Live ISO ships with SSH enabled (root/quickfw) for first-boot
 # diagnostics. Once the wizard runs, the operator can disable it from
@@ -179,6 +180,12 @@ label quickfw-install
 	linux /live/vmlinuz
 	initrd /live/initrd.img
 	append boot=live components hostname=quickfw toram quickfw.install=1 quiet loglevel=3 systemd.show_status=false rd.systemd.show_status=false
+
+label quickfw-recover
+	menu label ^Recover (reset password / network on a stuck install)
+	linux /live/vmlinuz
+	initrd /live/initrd.img
+	append boot=live components hostname=quickfw toram quickfw.recover=1 quiet loglevel=3 systemd.show_status=false rd.systemd.show_status=false
 
 label quickfw-safe
 	menu label QuickFW (Safe Mode)
